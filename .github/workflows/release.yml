@@ -9,7 +9,7 @@ on:
         options: [patch, minor, major]
 jobs:
   release:
-    uses: plures/.github/.github/workflows/release-reusable.yml@main
+    uses: plures/.github/.github/workflows/release-reusable.yml@<pinned-ref>
     with:
       bump: ${{ inputs.bump || '' }}
     secrets: inherit
