@@ -59,10 +59,13 @@ jobs:
             const botId = 'BOT_kgDOC9w8XQ';
 
             // Phase 1: Check open Copilot PRs — approve+merge if ready
-            const openPRs = await github.rest.pulls.list({
-              owner, repo, state: 'open', per_page: 10
+            const openPRs = await github.paginate(github.rest.pulls.list, {
+              owner,
+              repo,
+              state: 'open',
+              per_page: 100
             });
-            const copilotPRs = openPRs.data.filter(p => p.user.login === 'Copilot');
+            const copilotPRs = openPRs.filter(p => p.user.login === 'Copilot');
 
             for (const pr of copilotPRs) {
               const sha = pr.head.sha;
