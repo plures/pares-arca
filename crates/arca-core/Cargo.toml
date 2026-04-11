@@ -1,0 +1,18 @@
+[package]
+name = "arca-core"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Core library for Pares Arca — distributed Nix binary cache"
+
+[dependencies]
+serde = { workspace = true }
+serde_json = { workspace = true }
+sha2 = { workspace = true }
+hex = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+xz2 = { workspace = true }
+walkdir = { workspace = true }
+tempfile = { workspace = true }
+tokio = { workspace = true }

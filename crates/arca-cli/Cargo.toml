@@ -1,0 +1,20 @@
+[package]
+name = "pares-cache"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Pares Arca CLI — distributed Nix binary cache"
+
+[[bin]]
+name = "pares-cache"
+path = "src/main.rs"
+
+[dependencies]
+arca-core = { path = "../arca-core" }
+arca-server = { path = "../arca-server" }
+clap = { workspace = true }
+tokio = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+serde_json = { workspace = true }
+dirs-next = "2"
