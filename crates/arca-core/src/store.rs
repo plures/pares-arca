@@ -111,8 +111,7 @@ impl CacheStore {
         // 3. Compress with xz
         let compressed = {
             use std::io::Write;
-            let mut encoder =
-                xz2::write::XzEncoder::new(Vec::new(), 6);
+            let mut encoder = xz2::write::XzEncoder::new(Vec::new(), 6);
             encoder
                 .write_all(nar_data)
                 .map_err(|e| ArcaError::Compression(e.to_string()))?;
@@ -189,10 +188,7 @@ impl CacheStore {
         let narinfo_path = self.cache_dir.join(format!("{hash}.narinfo"));
         std::fs::write(&narinfo_path, info.to_string())?;
 
-        info!(
-            "Cached: {store_path} ({} bytes compressed)",
-            file_size
-        );
+        info!("Cached: {store_path} ({} bytes compressed)", file_size);
 
         Ok(info)
     }
@@ -205,12 +201,7 @@ impl CacheStore {
         info!("Importing closure for flake: {flake_ref}");
 
         let output = Command::new("nix")
-            .args([
-                "path-info",
-                "--recursive",
-                "--json",
-                flake_ref,
-            ])
+            .args(["path-info", "--recursive", "--json", flake_ref])
             .output()
             .map_err(|e| ArcaError::CommandFailed {
                 command: "nix path-info".into(),
@@ -294,11 +285,7 @@ impl CacheStore {
     pub fn count(&self) -> Result<usize, ArcaError> {
         let count = std::fs::read_dir(&self.cache_dir)?
             .filter_map(|e| e.ok())
-            .filter(|e| {
-                e.file_name()
-                    .to_string_lossy()
-                    .ends_with(".narinfo")
-            })
+            .filter(|e| e.file_name().to_string_lossy().ends_with(".narinfo"))
             .count();
         Ok(count)
     }

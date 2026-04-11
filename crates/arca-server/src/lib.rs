@@ -27,10 +27,7 @@ struct AppState {
 }
 
 /// Start the Arca HTTP server on the given address.
-pub async fn serve(
-    cache_dir: PathBuf,
-    bind: &str,
-) -> Result<(), Box<dyn std::error::Error>> {
+pub async fn serve(cache_dir: PathBuf, bind: &str) -> Result<(), Box<dyn std::error::Error>> {
     let store = CacheStore::new(&cache_dir)?;
     let state = Arc::new(AppState { store });
 
@@ -43,9 +40,7 @@ pub async fn serve(
 
     info!("Arca cache server listening on {bind}");
     info!("Cache directory: {}", cache_dir.display());
-    info!(
-        "Add to nix.conf: substituters = http://{bind} ; trusted-substituters = http://{bind}",
-    );
+    info!("Add to nix.conf: substituters = http://{bind} ; trusted-substituters = http://{bind}",);
 
     let listener = TcpListener::bind(bind).await?;
     axum::serve(listener, app).await?;
@@ -68,7 +63,9 @@ async fn narinfo(
     State(state): State<Arc<AppState>>,
     Path(hash_with_ext): Path<String>,
 ) -> impl IntoResponse {
-    let hash = hash_with_ext.strip_suffix(".narinfo").unwrap_or(&hash_with_ext);
+    let hash = hash_with_ext
+        .strip_suffix(".narinfo")
+        .unwrap_or(&hash_with_ext);
 
     match state.store.get_narinfo(hash) {
         Ok(content) => (
@@ -92,11 +89,7 @@ async fn nar_file(
     let nar_path = state.store.nar_path(&file);
 
     match tokio::fs::read(&nar_path).await {
-        Ok(data) => (
-            StatusCode::OK,
-            [("content-type", "application/x-xz")],
-            data,
-        ),
+        Ok(data) => (StatusCode::OK, [("content-type", "application/x-xz")], data),
         Err(_) => (
             StatusCode::NOT_FOUND,
             [("content-type", "text/plain")],

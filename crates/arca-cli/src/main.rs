@@ -12,7 +12,10 @@ use std::path::PathBuf;
 use tracing_subscriber::EnvFilter;
 
 #[derive(Parser)]
-#[command(name = "pares-cache", about = "Pares Arca — distributed Nix binary cache")]
+#[command(
+    name = "pares-cache",
+    about = "Pares Arca — distributed Nix binary cache"
+)]
 struct Cli {
     /// Cache directory (default: ~/.cache/pares-arca)
     #[arg(long, env = "PARES_CACHE_DIR")]
@@ -74,7 +77,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             let store = arca_core::CacheStore::new(&cache_dir)?;
             let info = store.import_store_path(&store_path)?;
             println!("✅ Cached: {}", info.store_path);
-            println!("   NAR: {} bytes → {} bytes compressed", info.nar_size, info.file_size);
+            println!(
+                "   NAR: {} bytes → {} bytes compressed",
+                info.nar_size, info.file_size
+            );
         }
 
         Commands::ImportClosure { flake_ref } => {
