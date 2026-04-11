@@ -33,9 +33,3 @@ jobs:
 
       - name: Test
         run: cargo test --all
-
-  release:
-    needs: check
-    if: github.ref == 'refs/heads/main'
-    uses: plures/.github/.github/workflows/release-reusable.yml@main
-    secrets: inherit
