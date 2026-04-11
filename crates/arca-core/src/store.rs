@@ -76,8 +76,7 @@ impl CacheStore {
         if self.has(hash) {
             debug!("Already cached: {store_path}");
             let narinfo_text = self.get_narinfo(hash)?;
-            return crate::narinfo::parse_narinfo(&narinfo_text)
-                .map_err(ArcaError::NarFailed);
+            return crate::narinfo::parse_narinfo(&narinfo_text).map_err(ArcaError::NarFailed);
         }
 
         info!("Importing: {store_path}");
