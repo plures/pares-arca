@@ -22,3 +22,5 @@ clap = { version = "4", features = ["derive", "env"] }
 xz2 = "0.1"
 walkdir = "2"
 tempfile = "3"
+snow = "0.9"
+rand = "0.8"
