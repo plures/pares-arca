@@ -1,0 +1,21 @@
+[package]
+name = "arca-swarm"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Hyperswarm-style P2P replication for Pares Arca binary cache"
+
+[dependencies]
+arca-core = { path = "../arca-core" }
+serde = { workspace = true }
+serde_json = { workspace = true }
+tokio = { workspace = true }
+tracing = { workspace = true }
+thiserror = { workspace = true }
+sha2 = { workspace = true }
+hex = { workspace = true }
+snow = "0.9"
+rand = "0.8"
+
+[dev-dependencies]
+tempfile = { workspace = true }

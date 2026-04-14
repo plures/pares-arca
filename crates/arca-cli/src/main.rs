@@ -6,6 +6,7 @@
 //! - `import-closure <flake-ref>` — Import an entire flake closure
 //! - `status` — Show cache status
 //! - `list` — List cached paths
+//! - `swarm` — Start P2P replication via Hyperswarm-style discovery
 
 use clap::{Parser, Subcommand};
 use std::path::PathBuf;
@@ -51,6 +52,44 @@ enum Commands {
 
     /// List all cached paths
     List,
+
+    /// Start Hyperswarm P2P cache replication
+    ///
+    /// Discovers peers that share the same `--topic` key using UDP multicast,
+    /// exchanges narinfo metadata via Noise-encrypted TCP connections, and
+    /// syncs the CRDT state to disk.  Falls back gracefully if no peers are
+    /// reachable.
+    Swarm {
+        /// Shared topic key — all nodes with the same topic will sync together.
+        ///
+        /// Only the SHA-256 hash of this string is sent on the wire, so the
+        /// raw topic remains private.
+        #[arg(long, default_value = "pares-cache-default")]
+        topic: String,
+
+        /// UDP port for peer discovery announcements.
+        #[arg(long, default_value_t = 7070)]
+        discovery_port: u16,
+
+        /// TCP port for Noise-encrypted sync connections.
+        #[arg(long, default_value_t = 7071)]
+        sync_port: u16,
+
+        /// HTTP server port announced to peers for NAR fetching.
+        #[arg(long, default_value_t = 5555)]
+        http_port: u16,
+
+        /// Also start the HTTP substituter server alongside the swarm.
+        #[arg(long)]
+        also_serve: bool,
+
+        /// Static peer addresses to always try connecting to
+        /// (e.g. bootstrap nodes or peers not reachable by multicast).
+        ///
+        /// Can be specified multiple times: `--static-peer 10.0.0.1:7070`
+        #[arg(long = "static-peer")]
+        static_peers: Vec<String>,
+    },
 }
 
 fn default_cache_dir() -> PathBuf {
@@ -112,6 +151,100 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 }
                 println!("\n{} paths cached", paths.len());
             }
+        }
+
+        Commands::Swarm {
+            topic,
+            discovery_port,
+            sync_port,
+            http_port,
+            also_serve,
+            static_peers,
+        } => {
+            // Parse static peer addresses.
+            let mut parsed_peers = Vec::new();
+            for raw in &static_peers {
+                match raw.parse() {
+                    Ok(addr) => parsed_peers.push(addr),
+                    Err(e) => {
+                        eprintln!("Invalid --static-peer address '{raw}': {e}");
+                        std::process::exit(1);
+                    }
+                }
+            }
+
+            let config = arca_swarm::SwarmConfig {
+                topic: topic.clone(),
+                discovery_port,
+                sync_port,
+                http_port,
+                static_peers: parsed_peers,
+                ephemeral_keys: false,
+            };
+
+            println!("🌐 Pares Arca Swarm");
+            println!("   Cache directory : {}", cache_dir.display());
+            println!("   Topic           : {topic}");
+            println!("   Discovery port  : UDP {discovery_port}");
+            println!("   Sync port       : TCP {sync_port}");
+            println!("   HTTP port       : {http_port}");
+            println!();
+            println!("   Discovering peers… (Ctrl-C to stop)");
+
+            // Set up a broadcast channel so we can shut everything down on
+            // Ctrl-C.
+            let (shutdown_tx, shutdown_rx) = tokio::sync::broadcast::channel::<()>(1);
+
+            // Set up an event channel to print swarm events.
+            let (event_tx, mut event_rx) =
+                tokio::sync::mpsc::unbounded_channel::<arca_swarm::SwarmEvent>();
+
+            // Spawn the event printer.
+            tokio::spawn(async move {
+                while let Some(event) = event_rx.recv().await {
+                    match event {
+                        arca_swarm::SwarmEvent::PeerSynced { peer_addr, new_paths } => {
+                            println!("   ✅ Synced with {peer_addr} — {new_paths} new path(s)");
+                        }
+                        arca_swarm::SwarmEvent::PeerSyncFailed { peer_addr, reason } => {
+                            println!("   ⚠️  Sync with {peer_addr} failed: {reason}");
+                        }
+                        arca_swarm::SwarmEvent::NoPeers => {
+                            println!("   ℹ️  No peers found — running in local-only mode");
+                            println!("      (will keep announcing; peers can join at any time)");
+                        }
+                    }
+                }
+            });
+
+            // Optionally start the HTTP server in the background.
+            if also_serve {
+                let bind = format!("0.0.0.0:{http_port}");
+                let serve_dir = cache_dir.clone();
+                let mut serve_shutdown = shutdown_tx.subscribe();
+                tokio::spawn(async move {
+                    tokio::select! {
+                        res = arca_server::serve(serve_dir, &bind) => {
+                            if let Err(e) = res { tracing::error!("HTTP server error: {e}"); }
+                        }
+                        _ = serve_shutdown.recv() => {}
+                    }
+                });
+                println!("   HTTP server     : http://0.0.0.0:{http_port}");
+            }
+
+            // Ctrl-C handler.
+            let ctrlc_tx = shutdown_tx.clone();
+            tokio::spawn(async move {
+                if tokio::signal::ctrl_c().await.is_ok() {
+                    println!("\n   Shutting down swarm…");
+                    let _ = ctrlc_tx.send(());
+                }
+            });
+
+            // Start the swarm node.
+            let node = arca_swarm::SwarmNode::new(cache_dir, config).await?;
+            node.run(shutdown_rx, Some(event_tx)).await?;
         }
     }
 
