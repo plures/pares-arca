@@ -347,7 +347,7 @@ mod tests {
         #[cfg(unix)]
         {
             let perms = fs::metadata(&path).expect("metadata").permissions().mode();
-            assert_eq!(perms & 0o111, 0o111);
+            assert_eq!(perms & 0o777, 0o755);
         }
 
         let _ = fs::remove_dir_all(base);
