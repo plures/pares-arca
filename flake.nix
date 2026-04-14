@@ -49,6 +49,18 @@
       nixosModules.default = { config, lib, pkgs, ... }:
         let
           cfg = config.services.pares-arca;
+          postBuildHookScript = pkgs.writeShellScript "pares-arca-post-build-hook" ''
+            set -euo pipefail
+
+            if [ -z "''${OUT_PATHS:-}" ]; then
+              exit 0
+            fi
+
+            while IFS= read -r path; do
+              [ -z "$path" ] && continue
+              PARES_CACHE_DIR=${cfg.cacheDir} ${self.packages.${pkgs.system}.default}/bin/pares-cache import "$path" >/dev/null 2>&1 || true
+            done <<< "$OUT_PATHS"
+          '';
         in
         {
           options.services.pares-arca = {
@@ -77,6 +89,12 @@
               default = false;
               description = "Whether to open the firewall for the cache port";
             };
+
+            postBuildHook = lib.mkOption {
+              type = lib.types.bool;
+              default = true;
+              description = "Whether to auto-import Nix build outputs into Pares Arca via a post-build hook";
+            };
           };
 
           config = lib.mkIf cfg.enable {
@@ -103,6 +121,8 @@
             nix.settings = {
               substituters = [ "http://${cfg.bind}:${toString cfg.port}" ];
               trusted-substituters = [ "http://${cfg.bind}:${toString cfg.port}" ];
+            } // lib.optionalAttrs cfg.postBuildHook {
+              post-build-hook = postBuildHookScript;
             };
           };
         };
