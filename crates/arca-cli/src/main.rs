@@ -122,11 +122,13 @@ if [ -z "${{OUT_PATHS:-}}" ]; then
     exit 0
 fi
 
-while IFS= read -r path; do
+for path in $OUT_PATHS; do
     [ -z "$path" ] && continue
     PARES_CACHE_DIR={cache} {cli} import "$path" >/dev/null 2>&1 || true
-done <<< "$OUT_PATHS"
-"#
+done
+"#,
+        cache = cache,
+        cli = cli
     )
 }
 
