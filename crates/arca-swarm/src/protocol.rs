@@ -133,8 +133,14 @@ mod tests {
     fn test_sync_have_list_roundtrip() {
         let msg = SyncMsg::HaveList {
             entries: vec![
-                HaveEntry { hash: "abc123".into(), timestamp: 1_700_000_000 },
-                HaveEntry { hash: "def456".into(), timestamp: 1_700_000_001 },
+                HaveEntry {
+                    hash: "abc123".into(),
+                    timestamp: 1_700_000_000,
+                },
+                HaveEntry {
+                    hash: "def456".into(),
+                    timestamp: 1_700_000_001,
+                },
             ],
         };
         let json = serde_json::to_string(&msg).unwrap();

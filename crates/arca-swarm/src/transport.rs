@@ -75,7 +75,11 @@ pub fn load_or_generate_keypair(cache_dir: &Path) -> Result<Keypair, SwarmError>
     }
 
     // Generate a fresh keypair via snow (uses the correct X25519 parameters).
-    let builder = snow::Builder::new(NOISE_PATTERN.parse().map_err(|e: snow::Error| SwarmError::Noise(e.to_string()))?);
+    let builder = snow::Builder::new(
+        NOISE_PATTERN
+            .parse()
+            .map_err(|e: snow::Error| SwarmError::Noise(e.to_string()))?,
+    );
     let raw = builder
         .generate_keypair()
         .map_err(|e| SwarmError::Noise(e.to_string()))?;
@@ -86,7 +90,10 @@ pub fn load_or_generate_keypair(cache_dir: &Path) -> Result<Keypair, SwarmError>
     };
 
     std::fs::write(&path, serde_json::to_string_pretty(&kp)?)?;
-    debug!("Generated new swarm keypair; public key = {}", kp.public_hex);
+    debug!(
+        "Generated new swarm keypair; public key = {}",
+        kp.public_hex
+    );
     Ok(kp)
 }
 
@@ -308,7 +315,9 @@ mod tests {
             .unwrap();
 
         let payload = serde_json::json!({ "hello": "world" });
-        send_encrypted(&mut stream, &mut ts, &payload).await.unwrap();
+        send_encrypted(&mut stream, &mut ts, &payload)
+            .await
+            .unwrap();
         let echo: serde_json::Value = recv_encrypted(&mut stream, &mut ts).await.unwrap();
         assert_eq!(echo["hello"], "world");
 
