@@ -7,8 +7,13 @@
 //! - `status` — Show cache status
 //! - `list` — List cached paths
 //! - `swarm` — Start P2P replication via Hyperswarm-style discovery
+//! - `install-hook` — Install Nix post-build hook for automatic imports
 
 use clap::{Parser, Subcommand};
+use std::fs;
+#[cfg(unix)]
+use std::os::unix::fs::PermissionsExt;
+use std::path::Path;
 use std::path::PathBuf;
 use tracing_subscriber::EnvFilter;
 
@@ -90,12 +95,52 @@ enum Commands {
         #[arg(long = "static-peer")]
         static_peers: Vec<String>,
     },
+
+    /// Install the Nix post-build hook at /etc/nix/post-build-hook
+    InstallHook,
 }
 
 fn default_cache_dir() -> PathBuf {
     dirs_next::cache_dir()
         .unwrap_or_else(|| PathBuf::from("/tmp"))
         .join("pares-arca")
+}
+
+fn shell_single_quote(s: &str) -> String {
+    let escaped = s.replace('\'', "'\"'\"'");
+    format!("'{escaped}'")
+}
+
+fn post_build_hook_script(cli_path: &Path, cache_dir: &Path) -> String {
+    let cli = shell_single_quote(&cli_path.display().to_string());
+    let cache = shell_single_quote(&cache_dir.display().to_string());
+    format!(
+        r#"#!/usr/bin/env bash
+set -euo pipefail
+
+if [ -z "${{OUT_PATHS:-}}" ]; then
+    exit 0
+fi
+
+for path in $OUT_PATHS; do
+    [ -z "$path" ] && continue
+    PARES_CACHE_DIR={cache} {cli} import "$path" >/dev/null 2>&1 || true
+done
+"#,
+        cache = cache,
+        cli = cli
+    )
+}
+
+fn install_post_build_hook(dest: &Path, cli_path: &Path, cache_dir: &Path) -> std::io::Result<()> {
+    if let Some(parent) = dest.parent() {
+        fs::create_dir_all(parent)?;
+    }
+
+    fs::write(dest, post_build_hook_script(cli_path, cache_dir))?;
+    #[cfg(unix)]
+    fs::set_permissions(dest, fs::Permissions::from_mode(0o755))?;
+    Ok(())
 }
 
 #[tokio::main]
@@ -203,7 +248,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             tokio::spawn(async move {
                 while let Some(event) = event_rx.recv().await {
                     match event {
-                        arca_swarm::SwarmEvent::PeerSynced { peer_addr, new_paths } => {
+                        arca_swarm::SwarmEvent::PeerSynced {
+                            peer_addr,
+                            new_paths,
+                        } => {
                             println!("   ✅ Synced with {peer_addr} — {new_paths} new path(s)");
                         }
                         arca_swarm::SwarmEvent::PeerSyncFailed { peer_addr, reason } => {
@@ -246,7 +294,64 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             let node = arca_swarm::SwarmNode::new(cache_dir, config).await?;
             node.run(shutdown_rx, Some(event_tx)).await?;
         }
+
+        Commands::InstallHook => {
+            let hook_path = Path::new("/etc/nix/post-build-hook");
+            let exe = std::env::current_exe()?;
+            install_post_build_hook(hook_path, &exe, &cache_dir)?;
+            println!("✅ Installed Nix post-build hook: {}", hook_path.display());
+            println!(
+                "   Hook imports build outputs into: {}",
+                cache_dir.display()
+            );
+        }
     }
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    #[test]
+    fn test_post_build_hook_script_uses_cli_and_cache_dir() {
+        let script = post_build_hook_script(
+            Path::new("/bin/pares-cache"),
+            Path::new("/var/cache/pares-arca"),
+        );
+        assert!(script.contains(
+            "PARES_CACHE_DIR='/var/cache/pares-arca' '/bin/pares-cache' import \"$path\""
+        ));
+        assert!(script.contains("while IFS= read -r path; do"));
+    }
+
+    #[test]
+    fn test_install_post_build_hook_writes_file() {
+        let nonce = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("system time should be after unix epoch")
+            .as_nanos();
+        let base = std::env::temp_dir().join(format!("pares-cache-install-hook-{nonce}"));
+        let path = base.join("post-build-hook");
+        install_post_build_hook(
+            &path,
+            Path::new("/bin/pares-cache"),
+            Path::new("/var/cache/pares-arca"),
+        )
+        .expect("install should succeed");
+
+        let contents = fs::read_to_string(&path).expect("hook script should be readable");
+        assert!(contents.contains("/bin/pares-cache"));
+        assert!(contents.contains("/var/cache/pares-arca"));
+
+        #[cfg(unix)]
+        {
+            let perms = fs::metadata(&path).expect("metadata").permissions().mode();
+            assert_eq!(perms & 0o777, 0o755);
+        }
+
+        let _ = fs::remove_dir_all(base);
+    }
 }

@@ -17,6 +17,7 @@ curl -sSL install-pares.plures.io | sh
 
 # NixOS configuration
 services.pares-arca.enable = true;
+services.pares-arca.postBuildHook = true;
 ```
 
 ### First Use
@@ -33,6 +34,9 @@ pares cache join-topic "a1b2c3d4e5f6..."
 
 # View your cached builds
 pares cache list
+
+# Install the system post-build hook (writes /etc/nix/post-build-hook)
+sudo pares-cache install-hook
 ```
 
 That's it! Your Nix builds now cache automatically and sync across all your machines.
