@@ -173,10 +173,7 @@ mod tests {
     #[test]
     fn test_want_from_returns_missing() {
         let crdt = NarInfoCrdt::new();
-        let peer = vec![
-            ("abc".to_string(), 100u64),
-            ("def".to_string(), 200u64),
-        ];
+        let peer = vec![("abc".to_string(), 100u64), ("def".to_string(), 200u64)];
         let wanted = crdt.want_from(&peer);
         assert_eq!(wanted.len(), 2);
     }
@@ -215,8 +212,11 @@ mod tests {
     fn test_seed_ignores_non_narinfo_files() {
         let dir = tempdir().unwrap();
         std::fs::write(dir.path().join("nix-cache-info"), "StoreDir: /nix/store\n").unwrap();
-        std::fs::write(dir.path().join("abc123.narinfo"), "StorePath: /nix/store/abc123\n")
-            .unwrap();
+        std::fs::write(
+            dir.path().join("abc123.narinfo"),
+            "StorePath: /nix/store/abc123\n",
+        )
+        .unwrap();
 
         let mut crdt = NarInfoCrdt::new();
         crdt.seed_from_dir(dir.path()).unwrap();

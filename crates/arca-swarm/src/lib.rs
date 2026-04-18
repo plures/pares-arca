@@ -259,8 +259,7 @@ impl SwarmNode {
         let synced: Arc<Mutex<HashSet<PeerKey>>> = Arc::new(Mutex::new(HashSet::new()));
 
         // Channel through which discovery feeds peer info to the connector.
-        let (peer_tx, peer_rx) =
-            tokio::sync::mpsc::unbounded_channel::<DiscoveredPeer>();
+        let (peer_tx, peer_rx) = tokio::sync::mpsc::unbounded_channel::<DiscoveredPeer>();
 
         // ---- Start the TCP sync server ----
         let sync_listener = TcpListener::bind(format!("0.0.0.0:{}", self.config.sync_port))
@@ -687,12 +686,20 @@ async fn run_sync_session(
             .collect()
     };
 
-    send_encrypted(stream, noise, &SyncMsg::HaveList { entries: have_entries }).await?;
+    send_encrypted(
+        stream,
+        noise,
+        &SyncMsg::HaveList {
+            entries: have_entries,
+        },
+    )
+    .await?;
 
     // ---- Receive peer's HaveList, compute WantList ----
     let peer_have: SyncMsg = recv_encrypted(stream, noise).await?;
     let want_hashes = if let SyncMsg::HaveList { entries } = peer_have {
-        let pairs: Vec<(String, u64)> = entries.into_iter().map(|e| (e.hash, e.timestamp)).collect();
+        let pairs: Vec<(String, u64)> =
+            entries.into_iter().map(|e| (e.hash, e.timestamp)).collect();
         crdt.lock().await.want_from(&pairs)
     } else {
         vec![]
@@ -704,7 +711,9 @@ async fn run_sync_session(
         send_encrypted(
             stream,
             noise,
-            &SyncMsg::WantList { hashes: want_hashes },
+            &SyncMsg::WantList {
+                hashes: want_hashes,
+            },
         )
         .await?;
     }
@@ -789,101 +798,106 @@ pub fn now_secs() -> u64 {
         .as_secs()
 }
 
-    #[cfg(test)]
-    mod tests {
-        use super::*;
+#[cfg(test)]
+mod tests {
+    use super::*;
 
-        /// Build a minimal `SwarmNode` backed by a temp dir.
-        async fn make_node(cache_dir: &std::path::Path, topic: &str, sync_port: u16) -> SwarmNode {
-            let config = SwarmConfig {
-                topic: topic.into(),
-                discovery_port: 0,   // not used in these unit tests
-                sync_port,
-                http_port: 5555,
-                static_peers: vec![],
-                ephemeral_keys: true,
-            };
-            SwarmNode::new(cache_dir.to_path_buf(), config).await.unwrap()
-        }
+    /// Build a minimal `SwarmNode` backed by a temp dir.
+    async fn make_node(cache_dir: &std::path::Path, topic: &str, sync_port: u16) -> SwarmNode {
+        let config = SwarmConfig {
+            topic: topic.into(),
+            discovery_port: 0, // not used in these unit tests
+            sync_port,
+            http_port: 5555,
+            static_peers: vec![],
+            ephemeral_keys: true,
+        };
+        SwarmNode::new(cache_dir.to_path_buf(), config)
+            .await
+            .unwrap()
+    }
 
-        #[test]
-        fn test_now_secs_is_positive() {
-            assert!(now_secs() > 0);
-        }
+    #[test]
+    fn test_now_secs_is_positive() {
+        assert!(now_secs() > 0);
+    }
 
-        #[test]
-        fn test_swarm_config_default() {
-            let cfg = SwarmConfig::default();
-            assert_eq!(cfg.discovery_port, 7070);
-            assert_eq!(cfg.sync_port, 7071);
-        }
+    #[test]
+    fn test_swarm_config_default() {
+        let cfg = SwarmConfig::default();
+        assert_eq!(cfg.discovery_port, 7070);
+        assert_eq!(cfg.sync_port, 7071);
+    }
 
-        /// End-to-end test: two nodes sync a single narinfo over an in-process
-        /// TCP connection without touching UDP multicast.
-        #[tokio::test]
-        async fn test_two_node_sync() {
-            let dir_a = tempfile::tempdir().unwrap();
-            let dir_b = tempfile::tempdir().unwrap();
+    /// End-to-end test: two nodes sync a single narinfo over an in-process
+    /// TCP connection without touching UDP multicast.
+    #[tokio::test]
+    async fn test_two_node_sync() {
+        let dir_a = tempfile::tempdir().unwrap();
+        let dir_b = tempfile::tempdir().unwrap();
 
-            // Seed node A with one narinfo.
-            let narinfo_content = "StorePath: /nix/store/abc123-hello-2.12\n\
+        // Seed node A with one narinfo.
+        let narinfo_content = "StorePath: /nix/store/abc123-hello-2.12\n\
                                    URL: nar/abc123.nar.xz\n\
                                    Compression: xz\n\
                                    FileHash: sha256:deadbeef\n\
                                    FileSize: 1024\n\
                                    NarHash: sha256:cafebabe\n\
                                    NarSize: 4096\n";
-            tokio::fs::write(
-                dir_a.path().join("abc123.narinfo"),
-                narinfo_content.as_bytes(),
-            )
-            .await
-            .unwrap();
+        tokio::fs::write(
+            dir_a.path().join("abc123.narinfo"),
+            narinfo_content.as_bytes(),
+        )
+        .await
+        .unwrap();
 
-            // Pick an ephemeral port for the sync server.
-            let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
-            let sync_port = listener.local_addr().unwrap().port();
+        // Pick an ephemeral port for the sync server.
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let sync_port = listener.local_addr().unwrap().port();
 
-            // Build the nodes.
-            let node_a = make_node(dir_a.path(), "test-sync", sync_port).await;
-            let node_b = make_node(dir_b.path(), "test-sync", sync_port + 1).await;
+        // Build the nodes.
+        let node_a = make_node(dir_a.path(), "test-sync", sync_port).await;
+        let node_b = make_node(dir_b.path(), "test-sync", sync_port + 1).await;
 
-            let kp_a = Arc::clone(&node_a.keypair);
-            let kp_b = Arc::clone(&node_b.keypair);
-            let crdt_a = Arc::clone(&node_a.crdt);
-            let crdt_b = Arc::clone(&node_b.crdt);
-            let cache_a = node_a.cache_dir.clone();
-            let cache_b = node_b.cache_dir.clone();
+        let kp_a = Arc::clone(&node_a.keypair);
+        let kp_b = Arc::clone(&node_b.keypair);
+        let crdt_a = Arc::clone(&node_a.crdt);
+        let crdt_b = Arc::clone(&node_b.crdt);
+        let cache_a = node_a.cache_dir.clone();
+        let cache_b = node_b.cache_dir.clone();
 
-            // Spawn node A as the TCP responder on the pre-bound listener.
-            tokio::spawn(async move {
-                let (stream, peer_addr) = listener.accept().await.unwrap();
-                handle_inbound_sync(stream, peer_addr, kp_a, crdt_a, cache_a, 5555)
-                    .await
-                    .unwrap();
-            });
+        // Spawn node A as the TCP responder on the pre-bound listener.
+        tokio::spawn(async move {
+            let (stream, peer_addr) = listener.accept().await.unwrap();
+            handle_inbound_sync(stream, peer_addr, kp_a, crdt_a, cache_a, 5555)
+                .await
+                .unwrap();
+        });
 
-            // Wait a tick so the spawn is ready.
-            tokio::time::sleep(Duration::from_millis(10)).await;
+        // Wait a tick so the spawn is ready.
+        tokio::time::sleep(Duration::from_millis(10)).await;
 
-            // Node B initiates sync.
-            let peer_addr: SocketAddr = format!("127.0.0.1:{sync_port}").parse().unwrap();
-            let new_paths = initiate_sync(
-                peer_addr,
-                kp_b,
-                Arc::clone(&crdt_b),
-                cache_b.clone(),
-                5556,
-                "http://127.0.0.1:5555",
-            )
-            .await
-            .unwrap();
+        // Node B initiates sync.
+        let peer_addr: SocketAddr = format!("127.0.0.1:{sync_port}").parse().unwrap();
+        let new_paths = initiate_sync(
+            peer_addr,
+            kp_b,
+            Arc::clone(&crdt_b),
+            cache_b.clone(),
+            5556,
+            "http://127.0.0.1:5555",
+        )
+        .await
+        .unwrap();
 
-            // Node B should have received the narinfo from node A.
-            assert_eq!(new_paths, 1, "expected 1 new path synced to node B");
-            assert!(cache_b.join("abc123.narinfo").exists(), "narinfo written to disk");
+        // Node B should have received the narinfo from node A.
+        assert_eq!(new_paths, 1, "expected 1 new path synced to node B");
+        assert!(
+            cache_b.join("abc123.narinfo").exists(),
+            "narinfo written to disk"
+        );
 
-            let guard = crdt_b.lock().await;
-            assert!(guard.get("abc123").is_some());
-        }
+        let guard = crdt_b.lock().await;
+        assert!(guard.get("abc123").is_some());
     }
+}
