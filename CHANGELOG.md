@@ -1,3 +1,11 @@
+## [0.3.0] — 2026-04-24
+
+- docs: update README with keygen, config, and segment documentation (caed159)
+- feat: update post-build hook with segment routing (0b38d57)
+- feat: add config file support with cache segments (fca441b)
+- feat: add keygen command for 256-bit topic key generation (34796f3)
+- feat: add .praxis foundation (ADR-0001, ADR-0002, milestone 0.3 expectations) (d53ef44)
+
 ## [0.2.2] — 2026-04-24
 
 - fix: remove redundant double-write in NixOS post-build hook (3814f3b)
