@@ -1,3 +1,11 @@
+## [0.2.1] — 2026-04-24
+
+- fix: axum route panic — /{hash}.narinfo is invalid, use /{hash_narinfo} with suffix check (264ac80)
+- docs: refresh ROADMAP.md with OASIS strategic alignment (e1e1334)
+- ignore multicast test — requires real network device, fails in nix sandbox (cbf7148)
+- chore: change license to MIT in flake.nix (0c0bbaf)
+- docs: update copilot-instructions with praxis, design-dojo, automation rules (8efef46)
+
 # Changelog
 
 ## [0.2.0] — 2026-04-23
