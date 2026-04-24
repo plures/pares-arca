@@ -138,7 +138,9 @@ mod tests {
     use crate::topic::topic_hash_hex;
 
     /// Smoke-test: bind two sockets, send an Announce, receive it.
+    /// Requires a real multicast-capable network device; skipped in sandboxed builds.
     #[tokio::test]
+    #[ignore]
     async fn test_multicast_announce_recv() {
         // Pick an ephemeral port for the test to avoid collisions.
         let sender = DiscoverySocket::bind(0).await.unwrap();
