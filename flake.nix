@@ -1,5 +1,5 @@
 {
-  description = "Pares Arca — distributed Nix binary cache backed by PluresDB";
+  description = "Pares Arca — distributed Nix binary cache with P2P sync";
 
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
