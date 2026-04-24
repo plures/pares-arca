@@ -1,3 +1,11 @@
+## [0.2.2] — 2026-04-24
+
+- fix: remove redundant double-write in NixOS post-build hook (3814f3b)
+- fix: sync flake.nix version to 0.2.1 to match Cargo.toml (2025114)
+- fix: unify license as MIT across all files (311063c)
+- fix: stream NAR files instead of loading into memory (a9ae89c)
+- docs: rewrite README to document actual CLI and capabilities (a94d8eb)
+
 ## [0.2.1] — 2026-04-24
 
 - fix: axum route panic — /{hash}.narinfo is invalid, use /{hash_narinfo} with suffix check (264ac80)
