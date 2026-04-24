@@ -59,7 +59,6 @@
             set -f
             for path in $OUT_PATHS; do
               PARES_CACHE_DIR=${lib.escapeShellArg (toString cfg.cacheDir)} ${self.packages.${pkgs.system}.default}/bin/pares-cache import "$path" >/dev/null 2>&1 || true
-              PARES_CACHE_DIR=${cfg.cacheDir} ${self.packages.${pkgs.system}.default}/bin/pares-cache import "$path" >/dev/null 2>&1 || true
             done
           '';
         in
