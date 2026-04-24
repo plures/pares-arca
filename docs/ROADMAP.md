@@ -1,26 +1,36 @@
 # Pares Arca (pares-cache) Roadmap
 
-## Role in Pares Ecosystem
-Pares Arca is the distributed cache and free-tier onramp for the Pares mesh. It turns Nix builds into shareable, encrypted artifacts stored in PluresDB and replicated over Hyperswarm, making the mesh useful on day one.
+## Role in OASIS
+Pares Arca is the free-tier entry point to the OASIS mesh. It provides a privacy-preserving, distributed cache for artifacts and content (build outputs, models, media, packages) so OASIS nodes can operate locally-first with fast, secure sharing.
 
 ## Current State
-The repo provides architecture and product framing, but no source implementation is present (no src tree). Core capabilities like cache eviction, PluresDB storage, and Hyperswarm discovery are planned but not built.
+Architecture and product framing exist, but there is no production implementation in this repo yet. Core cache storage, P2P replication, and Nix integration are planned but not built.
 
-## Milestones
+## Phases
 
-### Near-term (Q2 2026)
+### Phase 1 — Core Cache & Sharing
 - Implement PluresDB-backed artifact storage with content addressing.
-- Integrate with Nix substituter protocol for local cache hits.
-- Establish topic-key discovery and peer replication over Hyperswarm.
-- Add basic cache statistics and CLI status commands.
+- Add topic-key based peer discovery + replication over Hyperswarm.
+- Integrate Nix substituter protocol for local/peer cache hits.
+- Ship minimal CLI: create/join/list topics, cache stats.
 
-### Mid-term (Q3-Q4 2026)
-- Add cache eviction policies (LRU/size/age) with configurable limits.
-- Build bandwidth management + throttling for sync.
-- Implement metrics export (hit ratio, peer latency, storage usage).
-- Support multi-device “personal cache” sync and team topics.
+### Phase 2 — Multi-Device Reliability
+- Eviction policies (LRU/size/age) with tunable limits.
+- Metrics and telemetry (hit rate, peer latency, storage usage).
+- Bandwidth throttling and sync backpressure.
+- macOS/Linux support with install hooks and system services.
 
-### Long-term
-- Marketplace-grade reliability and provenance tracking.
-- Cross-platform support and hardened security posture.
-- Performance benchmarks at mesh scale and production documentation.
+### Phase 3 — OASIS Integration
+- Signed artifact provenance + integrity verification.
+- Praxis-driven cache policies (privacy, residency, access constraints).
+- Cache-aware deployment pipeline for Rector + pares-nix.
+- Content classes for OASIS (models, proofs, commerce bundles).
+
+### Phase 4 — Marketplace & Scale
+- Paid cache sharing tiers and quota enforcement.
+- Cross-mesh replication and federation.
+- Large-scale performance benchmarks and operational playbooks.
+- Operator tooling for enterprise fleets.
+
+## Status
+🚧 Pre-alpha — core cache implementation required.
