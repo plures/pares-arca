@@ -1,31 +1,71 @@
 #!/usr/bin/env bash
-# post-build-hook.sh — Nix post-build hook that auto-imports into Pares Arca.
+# post-build-hook.sh — Nix post-build hook with segment routing.
 #
 # Install: Add to /etc/nix/nix.conf:
 #   post-build-hook = /path/to/post-build-hook.sh
 #
 # Nix calls this with $OUT_PATHS (newline-separated store paths).
+# This hook routes each path to the correct cache segment:
+#   - nixpkgs paths → universal segment
+#   - custom paths → custom segment
 
 set -euo pipefail
 
+CONFIG_FILE="${PARES_CACHE_CONFIG:-${XDG_CONFIG_HOME:-$HOME/.config}/pares-cache/config.toml}"
 CACHE_DIR="${PARES_CACHE_DIR:-$HOME/.cache/pares-arca}"
 LOG="/tmp/pares-arca-hook.log"
 
-# Ensure cache dir exists
-mkdir -p "$CACHE_DIR/nar"
+# Determine if a store path is from nixpkgs.
+# Uses nix path-info --json when available for accurate detection,
+# falls back to name heuristics.
+is_nixpkgs_path() {
+    local path="$1"
+    local basename
+    basename=$(basename "$path")
+    # Strip the 32-char hash prefix + dash
+    local name_part="${basename:33}"
 
-for path in $OUT_PATHS; do
-    hash=$(basename "$path" | cut -d'-' -f1)
-    
-    # Skip if already cached
-    if [ -f "$CACHE_DIR/$hash.narinfo" ]; then
-        continue
+    # Heuristic: custom builds often start with "source" or contain "-custom-"/"-local-"
+    if [[ "$name_part" == source* ]] || [[ "$name_part" == *-custom-* ]] || [[ "$name_part" == *-local-* ]]; then
+        return 1  # not nixpkgs
     fi
 
-    echo "[$(date -Iseconds)] Caching: $path" >> "$LOG"
-    
-    # Use pares-cache CLI if available, fall back to manual
+    # Try nix path-info for more accurate detection
+    if command -v nix &>/dev/null; then
+        local info
+        if info=$(nix path-info --json "$path" 2>/dev/null); then
+            # If the deriver is from nixpkgs, it's a nixpkgs path
+            if echo "$info" | grep -q '"nixpkgs"'; then
+                return 0
+            fi
+        fi
+    fi
+
+    # Default: treat as nixpkgs (most builds are)
+    return 0
+}
+
+# Determine segment for a path
+get_segment() {
+    local path="$1"
+    if is_nixpkgs_path "$path"; then
+        echo "universal"
+    else
+        echo "custom"
+    fi
+}
+
+if [ -z "${OUT_PATHS:-}" ]; then
+    exit 0
+fi
+
+while IFS= read -r path; do
+    [ -z "$path" ] && continue
+
+    segment=$(get_segment "$path")
+    echo "[$(date -Iseconds)] Caching: $path → segment=$segment" >> "$LOG"
+
     if command -v pares-cache &>/dev/null; then
-        pares-cache import "$path" 2>>"$LOG" || true
+        PARES_CACHE_DIR="$CACHE_DIR" pares-cache import --segment "$segment" "$path" >/dev/null 2>&1 || true
     fi
-done
+done <<< "$OUT_PATHS"
