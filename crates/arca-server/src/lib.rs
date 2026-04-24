@@ -10,6 +10,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use axum::{
+    body::Body,
     extract::{Path, State},
     http::StatusCode,
     response::IntoResponse,
@@ -17,6 +18,7 @@ use axum::{
     Router,
 };
 use tokio::net::TcpListener;
+use tokio_util::io::ReaderStream;
 use tracing::info;
 
 use arca_core::CacheStore;
@@ -49,7 +51,7 @@ pub async fn serve(cache_dir: PathBuf, bind: &str) -> Result<(), Box<dyn std::er
 
 /// `GET /nix-cache-info`
 async fn nix_cache_info(State(state): State<Arc<AppState>>) -> impl IntoResponse {
-    match std::fs::read_to_string(state.store.path().join("nix-cache-info")) {
+    match tokio::fs::read_to_string(state.store.path().join("nix-cache-info")).await {
         Ok(content) => (StatusCode::OK, content),
         Err(_) => (
             StatusCode::OK,
@@ -93,13 +95,18 @@ async fn nar_file(
 ) -> impl IntoResponse {
     let nar_path = state.store.nar_path(&file);
 
-    match tokio::fs::read(&nar_path).await {
-        Ok(data) => (StatusCode::OK, [("content-type", "application/x-xz")], data),
-        Err(_) => (
-            StatusCode::NOT_FOUND,
-            [("content-type", "text/plain")],
-            Vec::new(),
-        ),
+    match tokio::fs::File::open(&nar_path).await {
+        Ok(file) => {
+            let stream = ReaderStream::new(file);
+            let body = Body::from_stream(stream);
+            (
+                StatusCode::OK,
+                [("content-type", "application/x-xz")],
+                body,
+            )
+                .into_response()
+        }
+        Err(_) => (StatusCode::NOT_FOUND, "Not found").into_response(),
     }
 }
 
