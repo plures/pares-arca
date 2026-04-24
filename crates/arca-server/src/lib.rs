@@ -33,7 +33,7 @@ pub async fn serve(cache_dir: PathBuf, bind: &str) -> Result<(), Box<dyn std::er
 
     let app = Router::new()
         .route("/nix-cache-info", get(nix_cache_info))
-        .route("/{hash}.narinfo", get(narinfo))
+        .route("/{hash_narinfo}", get(narinfo))
         .route("/nar/{file}", get(nar_file))
         .route("/api/status", get(status))
         .with_state(state);
@@ -63,9 +63,14 @@ async fn narinfo(
     State(state): State<Arc<AppState>>,
     Path(hash_with_ext): Path<String>,
 ) -> impl IntoResponse {
-    let hash = hash_with_ext
-        .strip_suffix(".narinfo")
-        .unwrap_or(&hash_with_ext);
+    // Only serve .narinfo requests
+    let Some(hash) = hash_with_ext.strip_suffix(".narinfo") else {
+        return (
+            StatusCode::NOT_FOUND,
+            [("content-type", "text/plain")],
+            "Not found".to_string(),
+        );
+    };
 
     match state.store.get_narinfo(hash) {
         Ok(content) => (
