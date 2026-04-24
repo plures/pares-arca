@@ -22,10 +22,12 @@
 //! Nix Substituter Protocol
 //! ```
 
+pub mod config;
 pub mod error;
 pub mod narinfo;
 pub mod store;
 
+pub use config::{CacheConfig, CacheSegment, ConfigError, SegmentFilter};
 pub use error::ArcaError;
 pub use narinfo::NarInfo;
 pub use store::CacheStore;

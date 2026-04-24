@@ -44,6 +44,10 @@ enum Commands {
     Import {
         /// Store path (e.g., /nix/store/abc123-hello-2.12)
         store_path: String,
+
+        /// Target segment name (auto-detects if omitted)
+        #[arg(long)]
+        segment: Option<String>,
     },
 
     /// Import all paths in a flake's closure
@@ -154,13 +158,30 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let cli = Cli::parse();
     let cache_dir = cli.cache_dir.unwrap_or_else(default_cache_dir);
+    let config_path = arca_core::CacheConfig::default_path();
 
     match cli.command {
         Commands::Serve { bind } => {
+            let config = arca_core::CacheConfig::load_or_create(&config_path)?;
+            println!("📦 Loaded {} segment(s) from config", config.segments.len());
+            for seg in &config.segments {
+                println!("   • {} ({:?})", seg.name, seg.filter);
+            }
             arca_server::serve(cache_dir, &bind).await?;
         }
 
-        Commands::Import { store_path } => {
+        Commands::Import { store_path, segment } => {
+            let config = arca_core::CacheConfig::load_or_create(&config_path)?;
+            let seg = if let Some(ref name) = segment {
+                config.segment_by_name(name).ok_or_else(|| {
+                    format!("segment '{}' not found in config", name)
+                })?
+            } else {
+                config.segment_for_path(&store_path).ok_or_else(|| {
+                    "no matching segment for store path".to_string()
+                })?
+            };
+            println!("   Segment: {}", seg.name);
             let store = arca_core::CacheStore::new(&cache_dir)?;
             let info = store.import_store_path(&store_path)?;
             println!("✅ Cached: {}", info.store_path);
@@ -209,6 +230,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             also_serve,
             static_peers,
         } => {
+            let config = arca_core::CacheConfig::load_or_create(&config_path)?;
+            println!("📦 Loaded {} segment(s) from config", config.segments.len());
+            for seg in &config.segments {
+                println!("   • {} (topic: {}...)", seg.name, &seg.topic_key[..8]);
+            }
             // Parse static peer addresses.
             let mut parsed_peers = Vec::new();
             for raw in &static_peers {
