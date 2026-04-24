@@ -98,6 +98,9 @@ enum Commands {
 
     /// Install the Nix post-build hook at /etc/nix/post-build-hook
     InstallHook,
+
+    /// Generate a cryptographically random 256-bit topic key
+    Keygen,
 }
 
 fn default_cache_dir() -> PathBuf {
@@ -305,6 +308,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 cache_dir.display()
             );
         }
+
+        Commands::Keygen => {
+            use rand::RngCore;
+            let mut key = [0u8; 32];
+            rand::rngs::OsRng.fill_bytes(&mut key);
+            println!("{}", hex::encode(key));
+        }
     }
 
     Ok(())
@@ -353,5 +363,28 @@ mod tests {
         }
 
         let _ = fs::remove_dir_all(base);
+    }
+
+    #[test]
+    fn test_keygen_output_format_and_uniqueness() {
+        use rand::RngCore;
+
+        let generate = || {
+            let mut key = [0u8; 32];
+            rand::rngs::OsRng.fill_bytes(&mut key);
+            hex::encode(key)
+        };
+
+        let key1 = generate();
+        let key2 = generate();
+
+        // 64 hex chars = 32 bytes = 256 bits
+        assert_eq!(key1.len(), 64);
+        assert_eq!(key2.len(), 64);
+        assert!(key1.chars().all(|c| c.is_ascii_hexdigit()));
+        assert!(key2.chars().all(|c| c.is_ascii_hexdigit()));
+
+        // Keys must be unique
+        assert_ne!(key1, key2);
     }
 }
