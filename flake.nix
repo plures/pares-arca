@@ -30,7 +30,7 @@
           meta = {
             description = "Distributed Nix binary cache";
             homepage = "https://github.com/plures/pares-cache";
-            license = pkgs.lib.licenses.bsl11;
+            license = pkgs.lib.licenses.mit;
           };
         };
 
