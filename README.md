@@ -1,182 +1,151 @@
 # Pares Arca
 
-> "strongbox" — the free draw
+> *arca* — "strongbox"
 
-Distributed content cache built on PluresDB + Hyperswarm. Every cache node is a full mesh participant. Free tier entry point to the Pares ecosystem — install the cache, become a node.
+A peer-to-peer Nix binary cache. Import store paths locally, serve them over HTTP as a Nix substituter, and replicate narinfo metadata to peers via encrypted Noise XX connections with UDP discovery.
 
-## Getting Started
+## Installation
 
-### Quick Installation
+### Nix Flake
 
 ```bash
-# Via Nix profile
 nix profile install github:plures/pares-cache
-
-# Via universal installer  
-curl -sSL install-pares.plures.io | sh
-
-# NixOS configuration
-services.pares-arca.enable = true;
-services.pares-arca.postBuildHook = true;
 ```
 
-### First Use
+### From Source
 
 ```bash
-# Check status
-pares cache status
+git clone https://github.com/plures/pares-cache.git
+cd pares-cache
+cargo build --release
+# Binary: target/release/pares-cache
+```
 
-# Create a personal topic (syncs across your devices)
-pares cache create-topic --name="personal"
+### NixOS Module
 
-# Join a team cache (share builds with teammates)
-pares cache join-topic "a1b2c3d4e5f6..."
+```nix
+{
+  inputs.pares-cache.url = "github:plures/pares-cache";
 
-# View your cached builds
-pares cache list
+  # In your configuration:
+  imports = [ pares-cache.nixosModules.default ];
 
-# Install the system post-build hook (writes /etc/nix/post-build-hook)
+  services.pares-arca = {
+    enable = true;
+    port = 5555;
+    postBuildHook = true;  # auto-import build outputs
+  };
+}
+```
+
+The module starts a systemd service, configures Nix to use the local cache as a substituter, and optionally installs a post-build hook that imports every build output automatically.
+
+## Quick Start
+
+```bash
+# Import a store path into the cache
+pares-cache import /nix/store/abc123-hello-2.12
+
+# Import an entire flake closure
+pares-cache import-closure .
+
+# List cached paths
+pares-cache list
+
+# Check cache status
+pares-cache status
+
+# Serve as a Nix substituter (HTTP)
+pares-cache serve --bind 127.0.0.1:5555
+
+# Install the Nix post-build hook (auto-import all builds)
 sudo pares-cache install-hook
 ```
 
-That's it! Your Nix builds now cache automatically and sync across all your machines.
+Then add to your `nix.conf`:
 
-### What You Get
+```
+substituters = http://127.0.0.1:5555
+trusted-substituters = http://127.0.0.1:5555
+```
 
-- **Free forever** — No accounts, no subscriptions, no limits
-- **Instant sync** — Builds appear on all your devices immediately
-- **Team sharing** — Share caches with teammates via topic keys
-- **Privacy first** — Your builds stay private to your chosen peers
-- **Offline works** — Local cache always available, no internet required
+## P2P Swarm Sync
+
+Start a swarm node to replicate cached narinfo metadata with peers:
+
+```bash
+pares-cache swarm --topic "my-team-key"
+```
+
+All nodes sharing the same `--topic` string discover each other via UDP multicast, connect over Noise XX encrypted TCP, and exchange narinfo records. Only the SHA-256 hash of the topic is sent on the wire — the raw string stays private.
+
+```bash
+# Full options
+pares-cache swarm \
+  --topic "my-team-key" \
+  --discovery-port 7070 \
+  --sync-port 7071 \
+  --http-port 5555 \
+  --also-serve \
+  --static-peer 10.0.0.1:7070
+```
+
+- `--also-serve` starts the HTTP substituter alongside the swarm
+- `--static-peer` adds bootstrap peers for networks without multicast
+
+### How Sync Works
+
+1. Your node announces on the topic via UDP discovery
+2. Peers with the same topic connect over Noise-encrypted TCP
+3. Narinfo metadata is exchanged — peers learn what paths you have
+4. NAR files are fetched on-demand over HTTP when Nix requests them
+
+## CLI Reference
+
+| Command | Description |
+|---|---|
+| `serve --bind <addr>` | Start HTTP substituter (default: `127.0.0.1:5555`) |
+| `import <store-path>` | Import a single Nix store path |
+| `import-closure <flake-ref>` | Import all paths in a flake closure |
+| `status` | Show cache directory, path count, total size |
+| `list` | List all cached store paths |
+| `swarm` | Start P2P discovery and narinfo replication |
+| `install-hook` | Install Nix post-build hook at `/etc/nix/post-build-hook` |
+
+Global option: `--cache-dir <path>` or `PARES_CACHE_DIR` env var (default: `~/.cache/pares-arca`).
 
 ## Architecture
 
-Pares Arca transforms Nix's content-addressed nature into a powerful P2P caching system:
+Four crates:
+
+| Crate | Role |
+|---|---|
+| `arca-core` | Cache store, narinfo parsing, import/export, filesystem operations |
+| `arca-server` | Axum HTTP server implementing the Nix binary cache protocol |
+| `arca-swarm` | UDP discovery, Noise XX transport, narinfo CRDT sync, topic management |
+| `arca-cli` | CLI (`pares-cache` binary) wiring everything together |
+
+### Storage Layout
 
 ```
-Your Build → PluresDB → Hyperswarm → Team's Machines
-                ↓
-         Local Cache (always available)
+~/.cache/pares-arca/
+├── nix-cache-info       # Cache metadata
+├── <hash>.narinfo       # Per-path narinfo files
+└── nar/
+    └── <hash>.nar.xz    # Compressed NAR archives
 ```
 
-### Core Components
+## Current Limitations
 
-- **PluresDB**: CRDT-synced storage with content deduplication
-- **Hyperswarm**: Encrypted P2P transport with NAT traversal
-- **Nix Integration**: Drop-in substituter that works with existing workflows
-- **Topic Keys**: Cryptographic sharing - share key = share cache
-
-### How It Works
-
-1. **Build locally** → Nix builds something, Arca caches it in PluresDB
-2. **Share automatically** → Hyperswarm replicates to peers with same topic key  
-3. **Fetch instantly** → Next build needing that derivation gets it from cache
-4. **Falls back gracefully** → If not in cache, fetches from upstream (cache.nixos.org)
-
-This creates a **flywheel effect**: the more your team builds, the faster everyone's builds become.
-
-## Key Features
-
-### Zero-Configuration Sharing
-
-```bash
-# Share cache with team
-pares cache create-topic --name="frontend-team"
-# → Outputs: "Topic key: a1b2c3d4e5f6... (share this with team)"
-
-# Team members join
-pares cache join-topic "a1b2c3d4e5f6..."
-```
-
-Everyone with the same topic key automatically shares cached builds. No servers, no setup, no accounts.
-
-### Multi-Device Personal Cache
-
-Your personal builds sync across all your machines:
-
-```
-Desktop builds project → Laptop gets cache instantly
-Laptop builds Docker   → CI server gets cache instantly  
-CI builds deployment   → Both desktop+laptop get it
-```
-
-### Privacy by Design
-
-- **No central authority** sees your builds
-- **Peer discovery** via cryptographic topic keys only
-- **Encrypted transport** via Noise protocol
-- **Local-first** - works completely offline
-
-### Performance
-
-- **Local hits**: < 1ms (PluresDB query)
-- **Peer hits**: 10-100ms (direct P2P)
-- **Storage efficient**: CRDT deduplication + compression
-- **Bandwidth smart**: Only downloads what you need
-
-## Status
-
-🚧 **Pre-alpha** — Architecture and design phase.
-
-### Milestones
-
-- [ ] **Phase 1: Core Cache** (Q2 2026)
-  - [ ] PluresDB storage backend
-  - [ ] Hyperswarm P2P networking
-  - [ ] Nix substituter protocol
-  - [ ] Topic-based sharing
-  - [ ] NixOS integration
-
-- [ ] **Phase 2: Enhanced Features** (Q3 2026)
-  - [ ] Build provenance tracking
-  - [ ] Cache analytics and statistics
-  - [ ] Performance optimizations
-  - [ ] I2P privacy mode
-  - [ ] macOS support
-
-- [ ] **Phase 3: Mesh Integration** (Q4 2026)
-  - [ ] Marketplace readiness (compute sharing)
-  - [ ] Advanced peer capabilities
-  - [ ] Cross-platform support
-  - [ ] Enterprise features
+- **No signing** — NARs are not cryptographically signed yet. Use `trusted-substituters` in nix.conf.
+- **Narinfo-only sync** — The swarm replicates narinfo metadata; NAR files are fetched over HTTP on demand.
+- **xz compression only** — Imported NARs are compressed with xz. No zstd support yet.
+- **LAN discovery** — UDP multicast works on local networks. Use `--static-peer` for cross-network sync.
 
 ## Part of Pares
 
-pares-cache is part of the [Pares](https://github.com/plures/pares) mesh ecosystem:
-
-| Product | Latin | Role |
-|---|---|---|
-| **Pares Arca** | "strongbox" | Distributed cache (free tier) |
-| **Pares Agens** | "one who acts" | AI agent framework |
-| **Pares Manus** | "hands" | Capability nodes (Windows/macOS/mobile) |
-| **Pares Rector** | "one who steers" | Goal-based orchestrator |
-| **Arcae Nexus** | "strongboxes + connection" | Decentralized object registry |
-| **Pares Protocol** | — | Wire protocol + command channel |
-| **Pares Nix** | — | NixOS config generation |
-
-All components share [PluresDB](https://github.com/plures/pluresdb) as the data plane and [Hyperswarm](https://github.com/plures/hyperswarm) for P2P connectivity.
-
-### The Flywheel
-
-Pares Arca is the **free draw** that gets the ecosystem installed:
-
-1. **Install Pares** → get free cache (better than FlakeHub)
-2. **Free cache** → machine becomes a mesh node  
-3. **Connect devices** → multi-device cache sharing
-4. **Join mesh** → discover other Pares capabilities
-5. **Use marketplace** → buy/sell compute, content, services
-
-Every cache installation expands the mesh. Free forever by design.
-
-## Documentation
-
-- **[Design Document](docs/DESIGN.md)** — Technical architecture and implementation details
-- **[Development Guide](https://github.com/plures/development-guide)** — Cross-cutting concerns and standards
-
-## Contributing
-
-Pares Arca is open source under AGPL-3.0. See the [development guide](https://github.com/plures/development-guide) for contribution guidelines, coding standards, and architecture decisions.
+Pares Arca is part of the [Pares](https://github.com/plures) ecosystem of P2P tools built on [Hyperswarm](https://docs.holepunch.to/) for discovery and encrypted connectivity.
 
 ## License
 
-AGPL-3.0
+MIT — see [LICENSE](LICENSE).
