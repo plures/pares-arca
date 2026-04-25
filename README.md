@@ -167,7 +167,10 @@ pares-cache swarm \
 | `install-hook` | Install Nix post-build hook at `/etc/nix/post-build-hook` |
 | `keygen` | Generate a 256-bit random topic key |
 
-Global option: `--cache-dir <path>` or `PARES_CACHE_DIR` env var (default: `~/.cache/pares-arca`).
+Global options:
+- `--cache-dir <path>` or `PARES_CACHE_DIR` env var (default: `~/.cache/pares-arca`)
+- `--backend filesystem|sled` — storage backend (default: `filesystem`)
+- `--db-path <path>` — sled database directory (default: `<cache-dir>/db`)
 
 ## Architecture
 
@@ -175,7 +178,7 @@ Four crates:
 
 | Crate | Role |
 |---|---|
-| `arca-core` | Cache store, narinfo parsing, config, segment routing, import/export |
+| `arca-core` | Cache store, narinfo parsing, config, segment routing, import/export, backend trait, sled store, audit log |
 | `arca-server` | Axum HTTP server implementing the Nix binary cache protocol |
 | `arca-swarm` | UDP discovery, Noise XX transport, narinfo CRDT sync, topic management |
 | `arca-cli` | CLI (`pares-cache` binary) wiring everything together |
@@ -189,6 +192,21 @@ Four crates:
 └── nar/
     └── <hash>.nar.xz    # Compressed NAR archives
 ```
+
+### Storage Backends
+
+- **filesystem** (default) — narinfo as flat files, NARs in `nar/` subdirectory
+- **sled** — narinfo metadata in an embedded [sled](https://docs.rs/sled) database. Fast, atomic, foundation for PluresDB integration.
+
+```bash
+# Use sled backend
+pares-cache --backend sled status
+pares-cache --backend sled --db-path /var/lib/pares-arca/db status
+```
+
+### Audit Log
+
+When using the sled backend, an append-only audit log records cache events (Import, SyncReceive, Serve, GarbageCollect) with timestamps for traceability.
 
 ## Current Limitations
 
