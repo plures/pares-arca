@@ -18,3 +18,4 @@ xz2 = { workspace = true }
 walkdir = { workspace = true }
 tempfile = { workspace = true }
 tokio = { workspace = true }
+sled = "0.34"
