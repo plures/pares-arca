@@ -1,3 +1,11 @@
+## [1.1.0] — 2026-04-25
+
+- feat: zstd compression, garbage collection, v1.0.0 (de830b6)
+- feat: ed25519 narinfo signing (Phase 0.6a) (67b8e15)
+- feat: integrate plures-object for content-addressed NAR blob storage (phase 0.5) (ce60904)
+- feat: wire swarm --also-serve to use CacheBackend, default backend to sled (bdd52e7)
+- feat: wire HTTP server to use CacheBackend trait (7f9dd18)
+
 ## [0.4.0] — 2026-04-25
 
 - docs: add phase 0.4 praxis expectations + README backend docs (5c5be02)
