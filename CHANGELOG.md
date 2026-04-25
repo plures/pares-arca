@@ -1,3 +1,12 @@
+## [0.4.0] — 2026-04-25
+
+- docs: add phase 0.4 praxis expectations + README backend docs (5c5be02)
+- feat: wire --backend and --db-path flags into CLI (1a1f06f)
+- test: add backend conformance tests for filesystem and sled (6deee11)
+- feat: add append-only audit log backed by sled (6a9e32a)
+- feat: add sled-backed CacheBackend implementation (c1e469e)
+- feat: add CacheBackend trait + filesystem implementation (f1ce847)
+
 ## [0.3.0] — 2026-04-24
 
 - docs: update README with keygen, config, and segment documentation (caed159)
