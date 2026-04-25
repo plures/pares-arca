@@ -13,6 +13,7 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 use tracing::{debug, info, warn};
 
+use crate::backend::CacheBackend;
 use crate::error::ArcaError;
 use crate::narinfo::NarInfo;
 
@@ -303,6 +304,49 @@ impl CacheStore {
             .map(|m| m.len())
             .sum();
         Ok(size)
+    }
+}
+
+impl CacheBackend for CacheStore {
+    fn has(&self, hash: &str) -> bool {
+        self.has(hash)
+    }
+
+    fn get_narinfo(&self, hash: &str) -> Result<String, std::io::Error> {
+        let path = self.cache_dir.join(format!("{hash}.narinfo"));
+        std::fs::read_to_string(path)
+    }
+
+    fn put_narinfo(&self, hash: &str, content: &str) -> Result<(), std::io::Error> {
+        let path = self.cache_dir.join(format!("{hash}.narinfo"));
+        std::fs::write(path, content)
+    }
+
+    fn list_hashes(&self) -> Vec<String> {
+        std::fs::read_dir(&self.cache_dir)
+            .into_iter()
+            .flatten()
+            .filter_map(|e| e.ok())
+            .filter_map(|e| {
+                let name = e.file_name().to_string_lossy().to_string();
+                name.strip_suffix(".narinfo").map(String::from)
+            })
+            .collect()
+    }
+
+    fn count(&self) -> usize {
+        self.count().unwrap_or(0)
+    }
+
+    fn total_narinfo_size(&self) -> u64 {
+        std::fs::read_dir(&self.cache_dir)
+            .into_iter()
+            .flatten()
+            .filter_map(|e| e.ok())
+            .filter(|e| e.file_name().to_string_lossy().ends_with(".narinfo"))
+            .filter_map(|e| e.metadata().ok())
+            .map(|m| m.len())
+            .sum()
     }
 }
 

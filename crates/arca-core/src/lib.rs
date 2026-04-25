@@ -22,12 +22,18 @@
 //! Nix Substituter Protocol
 //! ```
 
+pub mod audit;
+pub mod backend;
 pub mod config;
 pub mod error;
 pub mod narinfo;
+pub mod sled_store;
 pub mod store;
 
+pub use audit::{AuditEntry, AuditEventType, AuditLog};
+pub use backend::CacheBackend;
 pub use config::{CacheConfig, CacheSegment, ConfigError, SegmentFilter};
 pub use error::ArcaError;
 pub use narinfo::NarInfo;
+pub use sled_store::SledStore;
 pub use store::CacheStore;
