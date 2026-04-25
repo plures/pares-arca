@@ -66,9 +66,19 @@ impl NarObjectStore {
         nar_filename: &str,
         data: Vec<u8>,
     ) -> Result<String, NarObjectError> {
+        self.put_nar_typed(nar_filename, data, "application/x-xz").await
+    }
+
+    /// Store a compressed NAR blob with a specific content type.
+    pub async fn put_nar_typed(
+        &self,
+        nar_filename: &str,
+        data: Vec<u8>,
+        content_type: &str,
+    ) -> Result<String, NarObjectError> {
         let key = format!("nar/{nar_filename}");
         self.service
-            .put_object(&key, Bytes::from(data), Some("application/x-xz".into()))
+            .put_object(&key, Bytes::from(data), Some(content_type.into()))
             .await
             .map_err(NarObjectError::Object)?;
         Ok(key)

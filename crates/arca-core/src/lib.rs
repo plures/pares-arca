@@ -27,6 +27,7 @@ pub mod signing;
 pub mod backend;
 pub mod config;
 pub mod error;
+pub mod gc;
 pub mod narinfo;
 pub mod object_store;
 pub mod sled_store;
@@ -34,7 +35,7 @@ pub mod store;
 
 pub use audit::{AuditEntry, AuditEventType, AuditLog};
 pub use backend::CacheBackend;
-pub use config::{CacheConfig, CacheSegment, ConfigError, SegmentFilter};
+pub use config::{CacheConfig, CacheSegment, Compression, ConfigError, SegmentFilter};
 pub use error::ArcaError;
 pub use narinfo::NarInfo;
 pub use object_store::{DedupStats, NarObjectError, NarObjectStore};

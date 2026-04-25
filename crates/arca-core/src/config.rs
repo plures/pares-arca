@@ -37,6 +37,40 @@ pub struct CacheSegment {
     pub filter: SegmentFilter,
 }
 
+/// Compression algorithm for NAR archives.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Compression {
+    Zstd,
+    Xz,
+}
+
+impl Default for Compression {
+    fn default() -> Self {
+        Compression::Zstd
+    }
+}
+
+impl std::fmt::Display for Compression {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Compression::Zstd => write!(f, "zstd"),
+            Compression::Xz => write!(f, "xz"),
+        }
+    }
+}
+
+impl std::str::FromStr for Compression {
+    type Err = String;
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s.to_lowercase().as_str() {
+            "zstd" => Ok(Compression::Zstd),
+            "xz" => Ok(Compression::Xz),
+            other => Err(format!("unknown compression: {other} (expected zstd or xz)")),
+        }
+    }
+}
+
 /// Top-level configuration.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CacheConfig {
@@ -45,6 +79,9 @@ pub struct CacheConfig {
     /// Optional path to ed25519 signing key (Nix format: name:base64)
     #[serde(default)]
     pub signing_key_path: Option<String>,
+    /// Compression algorithm for NAR archives (default: zstd)
+    #[serde(default)]
+    pub compression: Compression,
 }
 
 impl Default for CacheConfig {
@@ -57,6 +94,7 @@ impl Default for CacheConfig {
                 filter: SegmentFilter::Nixpkgs,
             }],
             signing_key_path: None,
+            compression: Compression::default(),
         }
     }
 }
@@ -212,6 +250,7 @@ mod tests {
     fn test_missing_topic_key_fails_validation() {
         let config = CacheConfig {
             signing_key_path: None,
+            compression: Compression::default(),
             segments: vec![CacheSegment {
                 name: "bad".to_string(),
                 topic_key: "".to_string(),
@@ -226,6 +265,7 @@ mod tests {
     fn test_invalid_topic_key_length_fails() {
         let config = CacheConfig {
             signing_key_path: None,
+            compression: Compression::default(),
             segments: vec![CacheSegment {
                 name: "bad".to_string(),
                 topic_key: "abcd".to_string(),
@@ -250,6 +290,7 @@ mod tests {
         let path = temp_path("roundtrip");
         let config = CacheConfig {
             signing_key_path: None,
+            compression: Compression::default(),
             segments: vec![
                 CacheSegment {
                     name: "universal".to_string(),
@@ -277,6 +318,7 @@ mod tests {
     fn test_segment_routing() {
         let config = CacheConfig {
             signing_key_path: None,
+            compression: Compression::default(),
             segments: vec![
                 CacheSegment {
                     name: "universal".to_string(),

@@ -2,7 +2,7 @@
 
 > *arca* — "strongbox"
 
-A peer-to-peer Nix binary cache with **segmented caching**. Import store paths locally, serve them over HTTP as a Nix substituter, and replicate narinfo metadata to peers via encrypted connections with UDP discovery.
+A peer-to-peer Nix binary cache with **segmented caching**, **narinfo signing**, and **zstd compression**. Import store paths locally, serve them over HTTP as a Nix substituter, and replicate narinfo metadata to peers via encrypted connections with UDP discovery.
 
 ## Key Concepts
 
@@ -54,8 +54,14 @@ The module starts a systemd service, configures Nix to use the local cache as a 
 ## Quick Start
 
 ```bash
-# Import a store path into the cache
+# Import a store path (default: zstd compression)
 pares-cache import /nix/store/abc123-hello-2.12
+
+# Import with xz compression instead
+pares-cache import --compression xz /nix/store/abc123-hello-2.12
+
+# Import and sign with ed25519 key
+pares-cache import --signing-key ~/.config/pares-cache/my-cache.secret /nix/store/abc123-hello-2.12
 
 # Import an entire flake closure
 pares-cache import-closure .
@@ -63,7 +69,7 @@ pares-cache import-closure .
 # List cached paths
 pares-cache list
 
-# Check cache status
+# Check cache status (includes dedup stats)
 pares-cache status
 
 # Serve as a Nix substituter (HTTP)
@@ -74,13 +80,93 @@ sudo pares-cache install-hook
 
 # Generate a topic key for a custom/private segment
 pares-cache keygen
+
+# Generate an ed25519 signing keypair
+pares-cache sign-keygen --name my-cache
+
+# Garbage collect old entries
+pares-cache gc --max-age 30d
+
+# Garbage collect to fit under a size limit
+pares-cache gc --max-size 10G
 ```
+
+## Narinfo Signing
+
+Nix verifies narinfo signatures to ensure cache integrity. Pares Arca supports ed25519 signing:
+
+```bash
+# Generate a keypair
+pares-cache sign-keygen --name my-cache
+# Output:
+#   Secret key: ~/.config/pares-cache/my-cache.secret
+#   Public key: ~/.config/pares-cache/my-cache.pub
+#   Public key: my-cache:Base64PublicKey==
+
+# Import with signing
+pares-cache import --signing-key ~/.config/pares-cache/my-cache.secret /nix/store/...
+
+# Or set in config.toml:
+# signing_key_path = "/home/user/.config/pares-cache/my-cache.secret"
+```
+
+Add the public key to consumers' `nix.conf`:
+```
+trusted-public-keys = cache.nixos.org-1:... my-cache:Base64PublicKey==
+```
+
+## Compression
+
+Pares Arca supports **zstd** (default) and **xz** compression for NAR archives:
+
+| Algorithm | Extension | Speed | Ratio | Default |
+|-----------|-----------|-------|-------|---------|
+| zstd      | `.nar.zst` | Fast (level 3) | Good | ✅ |
+| xz        | `.nar.xz`  | Slow (level 6) | Best | — |
+
+```bash
+# Use zstd (default)
+pares-cache import /nix/store/...
+
+# Use xz for better compression ratio
+pares-cache import --compression xz /nix/store/...
+```
+
+Set default in `config.toml`:
+```toml
+compression = "zstd"  # or "xz"
+```
+
+The HTTP server automatically detects the compression format from the file extension and sets the correct `Content-Type` header (`application/zstd` or `application/x-xz`).
+
+## Garbage Collection
+
+Remove old or excess cache entries:
+
+```bash
+# Remove entries older than 30 days
+pares-cache gc --max-age 30d
+
+# Remove LRU entries to fit under 10 GB
+pares-cache gc --max-size 10G
+
+# Both at once
+pares-cache gc --max-age 7d --max-size 5G
+```
+
+Duration formats: `30d`, `7d`, `24h`, `1h30m`
+Size formats: `10G`, `500M`, `1T`, `100K`
+
+GC removes both narinfo metadata and NAR data from the object store, and records `GarbageCollect` events in the audit log.
 
 ### Configuration
 
 The config file at `~/.config/pares-cache/config.toml` defines your cache segments:
 
 ```toml
+compression = "zstd"
+# signing_key_path = "/home/user/.config/pares-cache/my-cache.secret"
+
 [[segments]]
 name = "universal"
 topic_key = "a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0c1d2e3f4a5b6c7d8e9f0a1b2"
@@ -104,9 +190,11 @@ filter = "custom"
 ```bash
 # On both machines:
 pares-cache keygen  # Share this key securely
+pares-cache sign-keygen --name team-cache  # Share public key
 
 # Edit ~/.config/pares-cache/config.toml on both machines:
 # Add a "team" segment with the shared key and filter = "custom"
+# Set signing_key_path to the secret key
 
 # Machine A:
 pares-cache swarm --also-serve
@@ -119,7 +207,7 @@ Then add to your `nix.conf`:
 
 ```
 substituters = http://127.0.0.1:5555
-trusted-substituters = http://127.0.0.1:5555
+trusted-public-keys = team-cache:Base64PublicKey==
 ```
 
 ## P2P Swarm Sync
@@ -159,17 +247,22 @@ pares-cache swarm \
 |---|---|
 | `serve --bind <addr>` | Start HTTP substituter (default: `127.0.0.1:5555`) |
 | `import <store-path>` | Import a single Nix store path (auto-routes to segment) |
+| `import --compression zstd\|xz` | Import with specific compression (default: zstd) |
+| `import --signing-key <path>` | Import and sign with ed25519 key |
 | `import --segment <name> <path>` | Import to a specific segment |
 | `import-closure <flake-ref>` | Import all paths in a flake closure |
-| `status` | Show cache directory, path count, total size |
+| `status` | Show cache directory, path count, size, dedup stats |
 | `list` | List all cached store paths |
 | `swarm` | Start P2P discovery and narinfo replication |
 | `install-hook` | Install Nix post-build hook at `/etc/nix/post-build-hook` |
 | `keygen` | Generate a 256-bit random topic key |
+| `sign-keygen --name <name>` | Generate ed25519 signing keypair |
+| `gc --max-age <dur>` | Remove entries older than duration |
+| `gc --max-size <size>` | Remove LRU entries to fit under size limit |
 
 Global options:
 - `--cache-dir <path>` or `PARES_CACHE_DIR` env var (default: `~/.cache/pares-arca`)
-- `--backend filesystem|sled` — storage backend (default: `filesystem`)
+- `--backend filesystem|sled` — storage backend (default: `sled`)
 - `--db-path <path>` — sled database directory (default: `<cache-dir>/db`)
 
 ## Architecture
@@ -178,7 +271,7 @@ Four crates:
 
 | Crate | Role |
 |---|---|
-| `arca-core` | Cache store, narinfo parsing, config, segment routing, import/export, backend trait, sled store, audit log |
+| `arca-core` | Cache store, narinfo parsing, config, segment routing, signing, compression, GC, import/export, backend trait, sled store, audit log |
 | `arca-server` | Axum HTTP server implementing the Nix binary cache protocol |
 | `arca-swarm` | UDP discovery, Noise XX transport, narinfo CRDT sync, topic management |
 | `arca-cli` | CLI (`pares-cache` binary) wiring everything together |
@@ -188,21 +281,32 @@ Four crates:
 ```
 ~/.cache/pares-arca/
 ├── nix-cache-info       # Cache metadata
-├── <hash>.narinfo       # Per-path narinfo files
+├── <hash>.narinfo       # Per-path narinfo files (filesystem backend)
+├── db/                  # Sled database (sled backend)
+├── objects/
+│   ├── chunks/          # Content-addressed chunks (plures-object)
+│   └── manifests/       # Object manifests
 └── nar/
-    └── <hash>.nar.xz    # Compressed NAR archives
+    └── <hash>.nar.zst   # Compressed NAR archives (legacy fallback)
 ```
 
 ### Storage Backends
 
-- **filesystem** (default) — narinfo as flat files, NARs in `nar/` subdirectory
-- **sled** — narinfo metadata in an embedded [sled](https://docs.rs/sled) database. Fast, atomic, foundation for PluresDB integration.
+- **sled** (default) — narinfo metadata in an embedded [sled](https://docs.rs/sled) database. Fast, atomic, foundation for PluresDB integration.
+- **filesystem** — narinfo as flat files, NARs in `nar/` subdirectory.
 
 ```bash
-# Use sled backend
-pares-cache --backend sled status
-pares-cache --backend sled --db-path /var/lib/pares-arca/db status
+# Use filesystem backend
+pares-cache --backend filesystem status
 ```
+
+### Content-Addressed Storage
+
+NAR blobs are stored through [plures-object](https://github.com/plures/plures-object), which provides:
+
+- **Deduplication** — identical chunks across different NARs are stored once
+- **Content addressing** — SHA-256 chunk IDs guarantee integrity
+- **Streaming retrieval** — NARs are reassembled from chunks on demand
 
 ### Audit Log
 
@@ -210,9 +314,7 @@ When using the sled backend, an append-only audit log records cache events (Impo
 
 ## Current Limitations
 
-- **No signing** — NARs are not cryptographically signed yet. Use `trusted-substituters` in nix.conf.
 - **Narinfo-only sync** — The swarm replicates narinfo metadata; NAR files are fetched over HTTP on demand.
-- **xz compression only** — Imported NARs are compressed with xz. No zstd support yet.
 - **LAN discovery** — UDP multicast works on local networks. Use `--static-peer` for cross-network sync.
 
 ## Part of Pares

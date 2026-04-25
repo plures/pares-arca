@@ -13,6 +13,7 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 use tracing::{debug, info, warn};
 
+use crate::config::Compression;
 use crate::signing::CacheSigningKey;
 use crate::backend::CacheBackend;
 use crate::error::ArcaError;
@@ -79,8 +80,18 @@ impl CacheStore {
 
     /// Import a store path from the local Nix store into the cache.
     ///
-    /// Uses `nix-store --dump` to create the NAR, then compresses with xz.
+    /// Uses `nix-store --dump` to create the NAR, then compresses with the
+    /// specified algorithm (default: zstd).
     pub fn import_store_path(&self, store_path: &str) -> Result<NarInfo, ArcaError> {
+        self.import_store_path_compressed(store_path, &Compression::default())
+    }
+
+    /// Import a store path with a specific compression algorithm.
+    pub fn import_store_path_compressed(
+        &self,
+        store_path: &str,
+        compression: &Compression,
+    ) -> Result<NarInfo, ArcaError> {
         let hash = NarInfo::hash_from_store_path(store_path)
             .ok_or_else(|| ArcaError::InvalidStorePath(store_path.to_string()))?;
 
@@ -119,16 +130,24 @@ impl CacheStore {
             format!("sha256:{}", hex::encode(hasher.finalize()))
         };
 
-        // 3. Compress with xz
-        let compressed = {
-            use std::io::Write;
-            let mut encoder = xz2::write::XzEncoder::new(Vec::new(), 6);
-            encoder
-                .write_all(nar_data)
-                .map_err(|e| ArcaError::Compression(e.to_string()))?;
-            encoder
-                .finish()
-                .map_err(|e| ArcaError::Compression(e.to_string()))?
+        // 3. Compress with selected algorithm
+        let (compressed, compression_name, file_ext) = match compression {
+            Compression::Zstd => {
+                let compressed = zstd::encode_all(nar_data.as_slice(), 3)
+                    .map_err(|e| ArcaError::Compression(e.to_string()))?;
+                (compressed, "zstd", "nar.zst")
+            }
+            Compression::Xz => {
+                use std::io::Write;
+                let mut encoder = xz2::write::XzEncoder::new(Vec::new(), 6);
+                encoder
+                    .write_all(nar_data)
+                    .map_err(|e| ArcaError::Compression(e.to_string()))?;
+                let data = encoder
+                    .finish()
+                    .map_err(|e| ArcaError::Compression(e.to_string()))?;
+                (data, "xz", "nar.xz")
+            }
         };
 
         let file_size = compressed.len() as u64;
@@ -139,10 +158,14 @@ impl CacheStore {
         };
 
         // 4. Write compressed NAR to plures-object store (chunked, deduplicated)
-        let nar_filename = format!("{hash}.nar.xz");
+        let nar_filename = format!("{hash}.{file_ext}");
+        let content_type = match compression {
+            Compression::Zstd => "application/zstd",
+            Compression::Xz => "application/x-xz",
+        };
         tokio::task::block_in_place(|| {
             tokio::runtime::Handle::current().block_on(async {
-                self.nar_store.put_nar(&nar_filename, compressed.clone()).await
+                self.nar_store.put_nar_typed(&nar_filename, compressed.clone(), content_type).await
             })
         })
         .map_err(|e| ArcaError::Compression(format!("object store put failed: {e}")))?;
@@ -189,7 +212,7 @@ impl CacheStore {
         let info = NarInfo {
             store_path: store_path.to_string(),
             url: format!("nar/{nar_filename}"),
-            compression: "xz".into(),
+            compression: compression_name.into(),
             file_hash,
             file_size,
             nar_hash,
@@ -214,7 +237,17 @@ impl CacheStore {
         store_path: &str,
         signing_key: &CacheSigningKey,
     ) -> Result<NarInfo, ArcaError> {
-        let mut info = self.import_store_path(store_path)?;
+        self.import_store_path_signed_compressed(store_path, signing_key, &Compression::default())
+    }
+
+    /// Import a store path, compress with specified algorithm, and sign.
+    pub fn import_store_path_signed_compressed(
+        &self,
+        store_path: &str,
+        signing_key: &CacheSigningKey,
+        compression: &Compression,
+    ) -> Result<NarInfo, ArcaError> {
+        let mut info = self.import_store_path_compressed(store_path, compression)?;
         let sig = signing_key.sign_narinfo(
             &info.store_path,
             &info.nar_hash,

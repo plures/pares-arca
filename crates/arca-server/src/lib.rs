@@ -111,11 +111,17 @@ async fn nar_file(
     State(state): State<Arc<AppState>>,
     Path(file): Path<String>,
 ) -> impl IntoResponse {
+    let content_type = if file.ends_with(".nar.zst") {
+        "application/zstd"
+    } else {
+        "application/x-xz"
+    };
+
     // Try plures-object store first
     if let Ok(data) = state.nar_store.get_nar(&file).await {
         return (
             StatusCode::OK,
-            [("content-type", "application/x-xz")],
+            [("content-type", content_type)],
             Body::from(data),
         )
             .into_response();
@@ -129,7 +135,7 @@ async fn nar_file(
             let body = Body::from_stream(stream);
             (
                 StatusCode::OK,
-                [("content-type", "application/x-xz")],
+                [("content-type", content_type)],
                 body,
             )
                 .into_response()

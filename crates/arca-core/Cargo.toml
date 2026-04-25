@@ -29,3 +29,5 @@ plures-object-store = { workspace = true }
 ed25519-dalek = { version = "2", features = ["std", "rand_core"] }
 rand = { workspace = true }
 base64 = "0.22"
+zstd = "0.13"
+humantime = "2"

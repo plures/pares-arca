@@ -21,3 +21,5 @@ serde_json = { workspace = true }
 dirs-next = "2"
 rand = { workspace = true }
 hex = { workspace = true }
+humantime = "2"
+sled = "0.34"

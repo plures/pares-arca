@@ -63,6 +63,10 @@ enum Commands {
         /// Path to ed25519 signing key for narinfo signatures
         #[arg(long)]
         signing_key: Option<PathBuf>,
+
+        /// Compression algorithm: zstd (default) or xz
+        #[arg(long, default_value = "zstd")]
+        compression: String,
     },
 
     /// Import all paths in a flake's closure
@@ -130,6 +134,17 @@ enum Commands {
         /// Output directory for key files (default: ~/.config/pares-cache/)
         #[arg(long)]
         output: Option<PathBuf>,
+    },
+
+    /// Garbage collect old or excess cache entries
+    Gc {
+        /// Remove entries older than this duration (e.g., "30d", "7d", "1h")
+        #[arg(long)]
+        max_age: Option<String>,
+
+        /// Remove LRU entries to fit under this size limit (e.g., "10G", "500M")
+        #[arg(long)]
+        max_size: Option<String>,
     },
 }
 
@@ -220,8 +235,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             arca_server::serve(server_backend, cache_dir, &bind).await?;
         }
 
-        Commands::Import { store_path, segment, signing_key } => {
+        Commands::Import { store_path, segment, signing_key, compression } => {
             let config = arca_core::CacheConfig::load_or_create(&config_path)?;
+            let comp: arca_core::Compression = compression.parse()
+                .map_err(|e: String| e)?;
             let seg = if let Some(ref name) = segment {
                 config.segment_by_name(name).ok_or_else(|| {
                     format!("segment '{}' not found in config", name)
@@ -239,9 +256,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             let info = if let Some(ref kp) = key_path {
                 let sk = arca_core::CacheSigningKey::from_file(kp)?;
                 println!("   Signing with key: {}", sk.name());
-                store.import_store_path_signed(&store_path, &sk)?
+                store.import_store_path_signed_compressed(&store_path, &sk, &comp)?
             } else {
-                store.import_store_path(&store_path)?
+                store.import_store_path_compressed(&store_path, &comp)?
             };
             println!("✅ Cached: {}", info.store_path);
             println!(
@@ -440,6 +457,65 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             println!("   Public key: {}", key.public_key_nix_format());
             println!();
             println!("To use: add to config.toml or pass --signing-key {}/{}.secret", dir.display(), name);
+        }
+
+        Commands::Gc { max_age, max_size } => {
+            if max_age.is_none() && max_size.is_none() {
+                eprintln!("Error: specify at least one of --max-age or --max-size");
+                std::process::exit(1);
+            }
+
+            let nar_store = arca_core::NarObjectStore::new(&cache_dir);
+
+            // Try to open audit log
+            let db_path_gc = db_path.clone();
+            let audit_log = sled::open(&db_path_gc)
+                .ok()
+                .and_then(|db| arca_core::AuditLog::new(&db).ok());
+
+            let mut total_removed = 0usize;
+            let mut total_freed = 0u64;
+
+            if let Some(ref age_str) = max_age {
+                let dur: std::time::Duration = age_str.parse::<humantime::Duration>()
+                    .map_err(|e| format!("invalid duration '{}': {}", age_str, e))?
+                    .into();
+                println!("🗑️  GC: removing entries older than {age_str}");
+                let result = arca_core::gc::gc_by_age(
+                    backend.as_ref(),
+                    &nar_store,
+                    &cache_dir,
+                    dur,
+                    audit_log.as_ref(),
+                )
+                .await
+                .map_err(|e| format!("GC by age failed: {e}"))?;
+                total_removed += result.removed;
+                total_freed += result.freed_bytes;
+            }
+
+            if let Some(ref size_str) = max_size {
+                let max = arca_core::gc::parse_size(size_str)
+                    .map_err(|e| format!("invalid size '{}': {}", size_str, e))?;
+                println!("🗑️  GC: trimming cache to under {size_str}");
+                let result = arca_core::gc::gc_by_size(
+                    backend.as_ref(),
+                    &nar_store,
+                    &cache_dir,
+                    max,
+                    audit_log.as_ref(),
+                )
+                .await
+                .map_err(|e| format!("GC by size failed: {e}"))?;
+                total_removed += result.removed;
+                total_freed += result.freed_bytes;
+            }
+
+            println!(
+                "✅ Removed {} entries, freed {}",
+                total_removed,
+                arca_core::gc::human_bytes(total_freed)
+            );
         }
     }
 
