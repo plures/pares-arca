@@ -192,7 +192,16 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             for seg in &config.segments {
                 println!("   • {} ({:?})", seg.name, seg.filter);
             }
-            arca_server::serve(cache_dir, &bind).await?;
+            // Clone backend into a Box for the server
+            let server_backend: Box<dyn CacheBackend> = match cli.backend.as_str() {
+                "sled" => {
+                    let db_path = cli.db_path.clone().unwrap_or_else(|| cache_dir.join("db"));
+                    Box::new(arca_core::SledStore::new(&db_path)
+                        .expect("failed to open sled database"))
+                }
+                _ => Box::new(arca_core::CacheStore::new(&cache_dir)?),
+            };
+            arca_server::serve(server_backend, cache_dir, &bind).await?;
         }
 
         Commands::Import { store_path, segment } => {

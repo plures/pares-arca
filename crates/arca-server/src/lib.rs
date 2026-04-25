@@ -21,17 +21,32 @@ use tokio::net::TcpListener;
 use tokio_util::io::ReaderStream;
 use tracing::info;
 
-use arca_core::CacheStore;
+use arca_core::backend::CacheBackend;
 
 /// Shared application state.
 struct AppState {
-    store: CacheStore,
+    backend: Box<dyn CacheBackend>,
+    /// Directory containing NAR blobs (always filesystem, regardless of backend).
+    nar_dir: PathBuf,
+    /// Directory for nix-cache-info file.
+    cache_dir: PathBuf,
 }
 
 /// Start the Arca HTTP server on the given address.
-pub async fn serve(cache_dir: PathBuf, bind: &str) -> Result<(), Box<dyn std::error::Error>> {
-    let store = CacheStore::new(&cache_dir)?;
-    let state = Arc::new(AppState { store });
+///
+/// `backend` provides narinfo storage (filesystem or sled).
+/// `cache_dir` is the base directory for NAR blobs and nix-cache-info.
+pub async fn serve(
+    backend: Box<dyn CacheBackend>,
+    cache_dir: PathBuf,
+    bind: &str,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let nar_dir = cache_dir.join("nar");
+    let state = Arc::new(AppState {
+        backend,
+        nar_dir,
+        cache_dir: cache_dir.clone(),
+    });
 
     let app = Router::new()
         .route("/nix-cache-info", get(nix_cache_info))
@@ -42,7 +57,9 @@ pub async fn serve(cache_dir: PathBuf, bind: &str) -> Result<(), Box<dyn std::er
 
     info!("Arca cache server listening on {bind}");
     info!("Cache directory: {}", cache_dir.display());
-    info!("Add to nix.conf: substituters = http://{bind} ; trusted-substituters = http://{bind}",);
+    info!(
+        "Add to nix.conf: substituters = http://{bind} ; trusted-substituters = http://{bind}",
+    );
 
     let listener = TcpListener::bind(bind).await?;
     axum::serve(listener, app).await?;
@@ -51,7 +68,7 @@ pub async fn serve(cache_dir: PathBuf, bind: &str) -> Result<(), Box<dyn std::er
 
 /// `GET /nix-cache-info`
 async fn nix_cache_info(State(state): State<Arc<AppState>>) -> impl IntoResponse {
-    match tokio::fs::read_to_string(state.store.path().join("nix-cache-info")).await {
+    match tokio::fs::read_to_string(state.cache_dir.join("nix-cache-info")).await {
         Ok(content) => (StatusCode::OK, content),
         Err(_) => (
             StatusCode::OK,
@@ -74,7 +91,7 @@ async fn narinfo(
         );
     };
 
-    match state.store.get_narinfo(hash) {
+    match state.backend.get_narinfo(hash) {
         Ok(content) => (
             StatusCode::OK,
             [("content-type", "text/x-nix-narinfo")],
@@ -93,7 +110,7 @@ async fn nar_file(
     State(state): State<Arc<AppState>>,
     Path(file): Path<String>,
 ) -> impl IntoResponse {
-    let nar_path = state.store.nar_path(&file);
+    let nar_path = state.nar_dir.join(&file);
 
     match tokio::fs::File::open(&nar_path).await {
         Ok(file) => {
@@ -112,15 +129,15 @@ async fn nar_file(
 
 /// `GET /api/status` — JSON status for CLI.
 async fn status(State(state): State<Arc<AppState>>) -> impl IntoResponse {
-    let count = state.store.count().unwrap_or(0);
-    let size = state.store.total_size().unwrap_or(0);
+    let count = state.backend.count();
+    let size = state.backend.total_narinfo_size();
 
     let body = serde_json::json!({
         "status": "ok",
         "cached_paths": count,
-        "total_size_bytes": size,
-        "total_size_human": human_size(size),
-        "cache_dir": state.store.path().display().to_string(),
+        "total_narinfo_size_bytes": size,
+        "total_narinfo_size_human": human_size(size),
+        "cache_dir": state.cache_dir.display().to_string(),
     });
 
     (StatusCode::OK, axum::Json(body))
