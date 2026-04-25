@@ -13,6 +13,7 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 use tracing::{debug, info, warn};
 
+use crate::signing::CacheSigningKey;
 use crate::backend::CacheBackend;
 use crate::error::ArcaError;
 use crate::narinfo::NarInfo;
@@ -203,6 +204,30 @@ impl CacheStore {
         std::fs::write(&narinfo_path, info.to_string())?;
 
         info!("Cached: {store_path} ({} bytes compressed)", file_size);
+
+        Ok(info)
+    }
+
+    /// Import a store path and sign the narinfo with the given key.
+    pub fn import_store_path_signed(
+        &self,
+        store_path: &str,
+        signing_key: &CacheSigningKey,
+    ) -> Result<NarInfo, ArcaError> {
+        let mut info = self.import_store_path(store_path)?;
+        let sig = signing_key.sign_narinfo(
+            &info.store_path,
+            &info.nar_hash,
+            info.nar_size,
+            &info.references,
+        );
+        info.sig = vec![sig];
+
+        // Re-write narinfo with signature
+        let hash = NarInfo::hash_from_store_path(store_path)
+            .ok_or_else(|| ArcaError::InvalidStorePath(store_path.to_string()))?;
+        let narinfo_path = self.cache_dir.join(format!("{hash}.narinfo"));
+        std::fs::write(&narinfo_path, info.to_string())?;
 
         Ok(info)
     }

@@ -23,6 +23,7 @@
 //! ```
 
 pub mod audit;
+pub mod signing;
 pub mod backend;
 pub mod config;
 pub mod error;
@@ -38,4 +39,5 @@ pub use error::ArcaError;
 pub use narinfo::NarInfo;
 pub use object_store::{DedupStats, NarObjectError, NarObjectStore};
 pub use sled_store::SledStore;
+pub use signing::{CacheSigningKey, generate_keypair_files, verify_narinfo_sig};
 pub use store::CacheStore;

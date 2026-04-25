@@ -26,3 +26,6 @@ plures-object-core = { workspace = true }
 plures-chunkstore = { workspace = true }
 plures-manifest-db = { workspace = true }
 plures-object-store = { workspace = true }
+ed25519-dalek = { version = "2", features = ["std", "rand_core"] }
+rand = { workspace = true }
+base64 = "0.22"

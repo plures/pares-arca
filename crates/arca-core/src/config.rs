@@ -42,6 +42,9 @@ pub struct CacheSegment {
 pub struct CacheConfig {
     /// Cache segments
     pub segments: Vec<CacheSegment>,
+    /// Optional path to ed25519 signing key (Nix format: name:base64)
+    #[serde(default)]
+    pub signing_key_path: Option<String>,
 }
 
 impl Default for CacheConfig {
@@ -53,6 +56,7 @@ impl Default for CacheConfig {
                 description: "Public nixpkgs binary cache".to_string(),
                 filter: SegmentFilter::Nixpkgs,
             }],
+            signing_key_path: None,
         }
     }
 }
@@ -207,6 +211,7 @@ mod tests {
     #[test]
     fn test_missing_topic_key_fails_validation() {
         let config = CacheConfig {
+            signing_key_path: None,
             segments: vec![CacheSegment {
                 name: "bad".to_string(),
                 topic_key: "".to_string(),
@@ -220,6 +225,7 @@ mod tests {
     #[test]
     fn test_invalid_topic_key_length_fails() {
         let config = CacheConfig {
+            signing_key_path: None,
             segments: vec![CacheSegment {
                 name: "bad".to_string(),
                 topic_key: "abcd".to_string(),
@@ -243,6 +249,7 @@ mod tests {
     fn test_roundtrip_config() {
         let path = temp_path("roundtrip");
         let config = CacheConfig {
+            signing_key_path: None,
             segments: vec![
                 CacheSegment {
                     name: "universal".to_string(),
@@ -269,6 +276,7 @@ mod tests {
     #[test]
     fn test_segment_routing() {
         let config = CacheConfig {
+            signing_key_path: None,
             segments: vec![
                 CacheSegment {
                     name: "universal".to_string(),

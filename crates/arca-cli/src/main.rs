@@ -59,6 +59,10 @@ enum Commands {
         /// Target segment name (auto-detects if omitted)
         #[arg(long)]
         segment: Option<String>,
+
+        /// Path to ed25519 signing key for narinfo signatures
+        #[arg(long)]
+        signing_key: Option<PathBuf>,
     },
 
     /// Import all paths in a flake's closure
@@ -116,6 +120,17 @@ enum Commands {
 
     /// Generate a cryptographically random 256-bit topic key
     Keygen,
+
+    /// Generate ed25519 signing keypair for narinfo signatures
+    SignKeygen {
+        /// Key name (e.g., "my-cache" or "cache.example.com")
+        #[arg(long)]
+        name: String,
+
+        /// Output directory for key files (default: ~/.config/pares-cache/)
+        #[arg(long)]
+        output: Option<PathBuf>,
+    },
 }
 
 fn default_cache_dir() -> PathBuf {
@@ -205,7 +220,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             arca_server::serve(server_backend, cache_dir, &bind).await?;
         }
 
-        Commands::Import { store_path, segment } => {
+        Commands::Import { store_path, segment, signing_key } => {
             let config = arca_core::CacheConfig::load_or_create(&config_path)?;
             let seg = if let Some(ref name) = segment {
                 config.segment_by_name(name).ok_or_else(|| {
@@ -218,12 +233,24 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             };
             println!("   Segment: {}", seg.name);
             let store = arca_core::CacheStore::new(&cache_dir)?;
-            let info = store.import_store_path(&store_path)?;
+
+            // Resolve signing key: CLI flag > config file
+            let key_path = signing_key.or_else(|| config.signing_key_path.as_ref().map(PathBuf::from));
+            let info = if let Some(ref kp) = key_path {
+                let sk = arca_core::CacheSigningKey::from_file(kp)?;
+                println!("   Signing with key: {}", sk.name());
+                store.import_store_path_signed(&store_path, &sk)?
+            } else {
+                store.import_store_path(&store_path)?
+            };
             println!("✅ Cached: {}", info.store_path);
             println!(
                 "   NAR: {} bytes → {} bytes compressed",
                 info.nar_size, info.file_size
             );
+            if !info.sig.is_empty() {
+                println!("   Sig: {}", info.sig[0]);
+            }
         }
 
         Commands::ImportClosure { flake_ref } => {
@@ -398,6 +425,21 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             let mut key = [0u8; 32];
             rand::rngs::OsRng.fill_bytes(&mut key);
             println!("{}", hex::encode(key));
+        }
+
+        Commands::SignKeygen { name, output } => {
+            let dir = output.unwrap_or_else(|| {
+                dirs_next::config_dir()
+                    .unwrap_or_else(|| PathBuf::from("~/.config"))
+                    .join("pares-cache")
+            });
+            let key = arca_core::generate_keypair_files(&name, &dir)?;
+            println!("✅ Generated signing keypair");
+            println!("   Secret key: {}/{}.secret", dir.display(), name);
+            println!("   Public key: {}/{}.pub", dir.display(), name);
+            println!("   Public key: {}", key.public_key_nix_format());
+            println!();
+            println!("To use: add to config.toml or pass --signing-key {}/{}.secret", dir.display(), name);
         }
     }
 

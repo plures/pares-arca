@@ -23,4 +23,7 @@ pub enum ArcaError {
 
     #[error("Command failed: {command} — {stderr}")]
     CommandFailed { command: String, stderr: String },
+
+    #[error("Signing error: {reason}")]
+    Signing { reason: String },
 }
