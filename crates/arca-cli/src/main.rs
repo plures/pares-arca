@@ -31,7 +31,7 @@ struct Cli {
     cache_dir: Option<PathBuf>,
 
     /// Storage backend: filesystem or sled
-    #[arg(long, default_value = "filesystem", env = "PARES_BACKEND")]
+    #[arg(long, default_value = "sled", env = "PARES_BACKEND")]
     backend: String,
 
     /// Database path for sled backend (default: <cache_dir>/db)
@@ -342,8 +342,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 let serve_dir = cache_dir.clone();
                 let mut serve_shutdown = shutdown_tx.subscribe();
                 tokio::spawn(async move {
+                    let serve_backend: Box<dyn CacheBackend> = Box::new(
+                        arca_core::CacheStore::new(&serve_dir).expect("failed to open cache store")
+                    );
                     tokio::select! {
-                        res = arca_server::serve(serve_dir, &bind) => {
+                        res = arca_server::serve(serve_backend, serve_dir, &bind) => {
                             if let Err(e) = res { tracing::error!("HTTP server error: {e}"); }
                         }
                         _ = serve_shutdown.recv() => {}
