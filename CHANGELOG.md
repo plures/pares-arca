@@ -1,3 +1,7 @@
+## [1.1.1] — 2026-04-25
+
+- fix: add allowBuiltinFetchGit for plures-object git dependency (a94aec7)
+
 ## [1.1.0] — 2026-04-25
 
 - feat: zstd compression, garbage collection, v1.0.0 (de830b6)
