@@ -1,3 +1,7 @@
+## [0.5.0] — 2026-04-25
+
+- feat: wire HTTP server to use CacheBackend trait (7f9dd18)
+
 ## [0.4.0] — 2026-04-25
 
 - docs: add phase 0.4 praxis expectations + README backend docs (5c5be02)
