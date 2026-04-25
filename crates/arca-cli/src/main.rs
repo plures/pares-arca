@@ -171,10 +171,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let cache_dir = cli.cache_dir.unwrap_or_else(default_cache_dir);
     let config_path = arca_core::CacheConfig::default_path();
 
+    let db_path = cli.db_path.unwrap_or_else(|| cache_dir.join("db"));
+
     // Build the selected backend for metadata operations.
     let backend: Arc<dyn CacheBackend> = match cli.backend.as_str() {
         "sled" => {
-            let db_path = cli.db_path.unwrap_or_else(|| cache_dir.join("db"));
             let store = arca_core::SledStore::new(&db_path)
                 .map_err(|e| format!("failed to open sled db: {e}"))?;
             Arc::new(store)
@@ -195,7 +196,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             // Clone backend into a Box for the server
             let server_backend: Box<dyn CacheBackend> = match cli.backend.as_str() {
                 "sled" => {
-                    let db_path = cli.db_path.clone().unwrap_or_else(|| cache_dir.join("db"));
+                    let db_path = db_path.clone();
                     Box::new(arca_core::SledStore::new(&db_path)
                         .expect("failed to open sled database"))
                 }
@@ -241,6 +242,18 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             println!("   Backend: {}", cli.backend);
             println!("   Cached paths: {count}");
             println!("   Narinfo size: {:.1} KB", size as f64 / 1024.0);
+
+            // Show plures-object dedup stats
+            let nar_store = arca_core::NarObjectStore::new(&cache_dir);
+            if let Ok(stats) = nar_store.dedup_stats().await {
+                if stats.nar_count > 0 {
+                    println!("   NAR objects: {}", stats.nar_count);
+                    println!("   Total NAR bytes: {:.1} KB", stats.total_nar_bytes as f64 / 1024.0);
+                    println!("   Unique chunk bytes: {:.1} KB", stats.unique_chunk_bytes as f64 / 1024.0);
+                    println!("   Unique chunks: {}", stats.unique_chunks);
+                    println!("   Dedup ratio: {:.2}x", stats.dedup_ratio());
+                }
+            }
         }
 
         Commands::List => {

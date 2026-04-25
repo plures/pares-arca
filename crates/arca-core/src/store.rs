@@ -16,11 +16,14 @@ use tracing::{debug, info, warn};
 use crate::backend::CacheBackend;
 use crate::error::ArcaError;
 use crate::narinfo::NarInfo;
+use crate::object_store::NarObjectStore;
 
-/// On-disk binary cache store.
+/// On-disk binary cache store with plures-object chunked NAR storage.
 pub struct CacheStore {
     /// Root directory of the cache.
     cache_dir: PathBuf,
+    /// Content-addressed NAR blob storage.
+    nar_store: NarObjectStore,
 }
 
 impl CacheStore {
@@ -39,12 +42,19 @@ impl CacheStore {
             )?;
         }
 
-        Ok(Self { cache_dir })
+        let nar_store = NarObjectStore::new(&cache_dir);
+
+        Ok(Self { cache_dir, nar_store })
     }
 
     /// Return the cache root path.
     pub fn path(&self) -> &Path {
         &self.cache_dir
+    }
+
+    /// Access the underlying NAR object store.
+    pub fn nar_object_store(&self) -> &NarObjectStore {
+        &self.nar_store
     }
 
     /// Check if a store path is already cached (by its hash prefix).
@@ -127,10 +137,14 @@ impl CacheStore {
             format!("sha256:{}", hex::encode(hasher.finalize()))
         };
 
-        // 4. Write compressed NAR
+        // 4. Write compressed NAR to plures-object store (chunked, deduplicated)
         let nar_filename = format!("{hash}.nar.xz");
-        let nar_path = self.nar_path(&nar_filename);
-        std::fs::write(&nar_path, &compressed)?;
+        tokio::task::block_in_place(|| {
+            tokio::runtime::Handle::current().block_on(async {
+                self.nar_store.put_nar(&nar_filename, compressed.clone()).await
+            })
+        })
+        .map_err(|e| ArcaError::Compression(format!("object store put failed: {e}")))?;
 
         // 5. Get references
         let refs_output = Command::new("nix-store")

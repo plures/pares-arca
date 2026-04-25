@@ -24,3 +24,12 @@ walkdir = "2"
 tempfile = "3"
 snow = "0.9"
 rand = "0.8"
+bytes = "1"
+async-trait = "0.1"
+chrono = { version = "0.4", features = ["serde"] }
+
+# plures-object crates (content-addressed chunked storage)
+plures-object-core = { git = "https://github.com/plures/plures-object.git", branch = "main" }
+plures-chunkstore = { git = "https://github.com/plures/plures-object.git", branch = "main" }
+plures-manifest-db = { git = "https://github.com/plures/plures-object.git", branch = "main" }
+plures-object-store = { git = "https://github.com/plures/plures-object.git", branch = "main" }

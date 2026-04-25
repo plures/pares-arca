@@ -27,6 +27,7 @@ pub mod backend;
 pub mod config;
 pub mod error;
 pub mod narinfo;
+pub mod object_store;
 pub mod sled_store;
 pub mod store;
 
@@ -35,5 +36,6 @@ pub use backend::CacheBackend;
 pub use config::{CacheConfig, CacheSegment, ConfigError, SegmentFilter};
 pub use error::ArcaError;
 pub use narinfo::NarInfo;
+pub use object_store::{DedupStats, NarObjectError, NarObjectStore};
 pub use sled_store::SledStore;
 pub use store::CacheStore;

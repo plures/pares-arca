@@ -19,3 +19,10 @@ walkdir = { workspace = true }
 tempfile = { workspace = true }
 tokio = { workspace = true }
 sled = "0.34"
+bytes = { workspace = true }
+async-trait = { workspace = true }
+chrono = { workspace = true }
+plures-object-core = { workspace = true }
+plures-chunkstore = { workspace = true }
+plures-manifest-db = { workspace = true }
+plures-object-store = { workspace = true }
