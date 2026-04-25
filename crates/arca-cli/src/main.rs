@@ -15,7 +15,10 @@ use std::fs;
 use std::os::unix::fs::PermissionsExt;
 use std::path::Path;
 use std::path::PathBuf;
+use std::sync::Arc;
 use tracing_subscriber::EnvFilter;
+
+use arca_core::CacheBackend;
 
 #[derive(Parser)]
 #[command(
@@ -26,6 +29,14 @@ struct Cli {
     /// Cache directory (default: ~/.cache/pares-arca)
     #[arg(long, env = "PARES_CACHE_DIR")]
     cache_dir: Option<PathBuf>,
+
+    /// Storage backend: filesystem or sled
+    #[arg(long, default_value = "filesystem", env = "PARES_BACKEND")]
+    backend: String,
+
+    /// Database path for sled backend (default: <cache_dir>/db)
+    #[arg(long, env = "PARES_DB_PATH")]
+    db_path: Option<PathBuf>,
 
     #[command(subcommand)]
     command: Commands,
@@ -160,6 +171,20 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let cache_dir = cli.cache_dir.unwrap_or_else(default_cache_dir);
     let config_path = arca_core::CacheConfig::default_path();
 
+    // Build the selected backend for metadata operations.
+    let backend: Arc<dyn CacheBackend> = match cli.backend.as_str() {
+        "sled" => {
+            let db_path = cli.db_path.unwrap_or_else(|| cache_dir.join("db"));
+            let store = arca_core::SledStore::new(&db_path)
+                .map_err(|e| format!("failed to open sled db: {e}"))?;
+            Arc::new(store)
+        }
+        "filesystem" | _ => {
+            let store = arca_core::CacheStore::new(&cache_dir)?;
+            Arc::new(store)
+        }
+    };
+
     match cli.command {
         Commands::Serve { bind } => {
             let config = arca_core::CacheConfig::load_or_create(&config_path)?;
@@ -200,25 +225,33 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
 
         Commands::Status => {
-            let store = arca_core::CacheStore::new(&cache_dir)?;
-            let count = store.count()?;
-            let size = store.total_size()?;
+            let count = backend.count();
+            let size = backend.total_narinfo_size();
             println!("📦 Pares Arca Cache");
             println!("   Directory: {}", cache_dir.display());
+            println!("   Backend: {}", cli.backend);
             println!("   Cached paths: {count}");
-            println!("   Total size: {:.1} MB", size as f64 / 1_048_576.0);
+            println!("   Narinfo size: {:.1} KB", size as f64 / 1024.0);
         }
 
         Commands::List => {
-            let store = arca_core::CacheStore::new(&cache_dir)?;
-            let paths = store.list()?;
-            if paths.is_empty() {
+            let hashes = backend.list_hashes();
+            if hashes.is_empty() {
                 println!("Cache is empty. Run `pares-cache import-closure .` to populate.");
             } else {
-                for path in &paths {
-                    println!("{path}");
+                for hash in &hashes {
+                    // Try to extract StorePath from narinfo content
+                    if let Ok(content) = backend.get_narinfo(hash) {
+                        if let Some(line) = content.lines().find(|l| l.starts_with("StorePath:")) {
+                            if let Some(path) = line.strip_prefix("StorePath:") {
+                                println!("{}", path.trim());
+                                continue;
+                            }
+                        }
+                    }
+                    println!("{hash}");
                 }
-                println!("\n{} paths cached", paths.len());
+                println!("\n{} paths cached", hashes.len());
             }
         }
 
