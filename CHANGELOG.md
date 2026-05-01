@@ -1,3 +1,7 @@
+## [1.1.2] — 2026-05-01
+
+- fix: suppress ci-feedback issue spam (24h dedup window) (5500493)
+
 ## [1.1.1] — 2026-04-25
 
 - fix: add allowBuiltinFetchGit for plures-object git dependency (a94aec7)
