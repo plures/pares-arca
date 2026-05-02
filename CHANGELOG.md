@@ -1,3 +1,7 @@
+## [1.1.4] — 2026-05-02
+
+- fix: sled double-open lock panic — reuse global backend in serve (f3e0fa4)
+
 ## [1.1.3] — 2026-05-02
 
 - fix: default backend to filesystem (sled lock panics on restart) (cb675e6)
