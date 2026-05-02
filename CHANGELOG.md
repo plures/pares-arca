@@ -1,3 +1,7 @@
+## [1.1.3] — 2026-05-02
+
+- fix: default backend to filesystem (sled lock panics on restart) (cb675e6)
+
 ## [1.1.2] — 2026-05-01
 
 - fix: suppress ci-feedback issue spam (24h dedup window) (5500493)
