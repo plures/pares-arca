@@ -229,18 +229,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             for seg in &config.segments {
                 println!("   • {} ({:?})", seg.name, seg.filter);
             }
-            // Clone backend into a Box for the server
+            // Reuse the global backend — don't open sled twice (causes lock conflict)
             let server_backend: Box<dyn CacheBackend> = match cli.backend.as_str() {
                 "sled" => {
-                    let db_path = db_path.clone();
-                    // Remove stale lock file if it exists (common after crashes/DynamicUser restarts)
-                    let lock_path = db_path.join("lock");
-                    if lock_path.exists() {
-                        eprintln!("⚠️  Removing stale sled lock: {}", lock_path.display());
-                        let _ = std::fs::remove_file(&lock_path);
-                    }
-                    Box::new(arca_core::SledStore::new(&db_path)
-                        .expect("failed to open sled database"))
+                    // Clone the Arc'd backend into a Box via a wrapper
+                    Box::new(ArcBackendWrapper(Arc::clone(&backend)))
                 }
                 _ => Box::new(arca_core::CacheStore::new(&cache_dir)?),
             };
@@ -601,4 +594,16 @@ mod tests {
         // Keys must be unique
         assert_ne!(key1, key2);
     }
+}
+
+/// Wrapper to use an `Arc<dyn CacheBackend>` where `Box<dyn CacheBackend>` is expected.
+struct ArcBackendWrapper(Arc<dyn CacheBackend>);
+
+impl CacheBackend for ArcBackendWrapper {
+    fn has(&self, hash: &str) -> bool { self.0.has(hash) }
+    fn get_narinfo(&self, hash: &str) -> Result<String, std::io::Error> { self.0.get_narinfo(hash) }
+    fn put_narinfo(&self, hash: &str, content: &str) -> Result<(), std::io::Error> { self.0.put_narinfo(hash, content) }
+    fn list_hashes(&self) -> Vec<String> { self.0.list_hashes() }
+    fn count(&self) -> usize { self.0.count() }
+    fn total_narinfo_size(&self) -> u64 { self.0.total_narinfo_size() }
 }
