@@ -31,7 +31,7 @@ struct Cli {
     cache_dir: Option<PathBuf>,
 
     /// Storage backend: filesystem or sled
-    #[arg(long, default_value = "sled", env = "PARES_BACKEND")]
+    #[arg(long, default_value = "filesystem", env = "PARES_BACKEND")]
     backend: String,
 
     /// Database path for sled backend (default: <cache_dir>/db)
@@ -206,6 +206,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Build the selected backend for metadata operations.
     let backend: Arc<dyn CacheBackend> = match cli.backend.as_str() {
         "sled" => {
+            // Remove stale lock file if it exists (common after crashes)
+            let lock_path = db_path.join("lock");
+            if lock_path.exists() {
+                eprintln!("⚠️  Removing stale sled lock: {}", lock_path.display());
+                let _ = std::fs::remove_file(&lock_path);
+            }
             let store = arca_core::SledStore::new(&db_path)
                 .map_err(|e| format!("failed to open sled db: {e}"))?;
             Arc::new(store)
@@ -227,6 +233,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             let server_backend: Box<dyn CacheBackend> = match cli.backend.as_str() {
                 "sled" => {
                     let db_path = db_path.clone();
+                    // Remove stale lock file if it exists (common after crashes/DynamicUser restarts)
+                    let lock_path = db_path.join("lock");
+                    if lock_path.exists() {
+                        eprintln!("⚠️  Removing stale sled lock: {}", lock_path.display());
+                        let _ = std::fs::remove_file(&lock_path);
+                    }
                     Box::new(arca_core::SledStore::new(&db_path)
                         .expect("failed to open sled database"))
                 }
