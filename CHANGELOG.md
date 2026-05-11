@@ -1,3 +1,7 @@
+## [1.1.5] — 2026-05-11
+
+- refactor: replace inline lifecycle with reusable workflow call (679ad66)
+
 ## [1.1.4] — 2026-05-02
 
 - fix: sled double-open lock panic — reuse global backend in serve (f3e0fa4)
