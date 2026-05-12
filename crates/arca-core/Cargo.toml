@@ -18,16 +18,10 @@ xz2 = { workspace = true }
 walkdir = { workspace = true }
 tempfile = { workspace = true }
 tokio = { workspace = true }
-sled = "0.34"
-bytes = { workspace = true }
-async-trait = { workspace = true }
+pluresdb-core = { workspace = true, optional = true }
+pluresdb-storage = { workspace = true, optional = true }
 chrono = { workspace = true }
-plures-object-core = { workspace = true }
-plures-chunkstore = { workspace = true }
-plures-manifest-db = { workspace = true }
-plures-object-store = { workspace = true }
-ed25519-dalek = { version = "2", features = ["std", "rand_core"] }
-rand = { workspace = true }
-base64 = "0.22"
-zstd = "0.13"
-humantime = "2"
+
+[features]
+default = ["pluresdb"]
+pluresdb = ["dep:pluresdb-core", "dep:pluresdb-storage"]
