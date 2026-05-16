@@ -37,7 +37,7 @@ impl CacheBackend for SledStore {
                 std::io::ErrorKind::NotFound,
                 format!("narinfo not found: {hash}"),
             )),
-            Err(e) => Err(std::io::Error::new(std::io::ErrorKind::Other, e)),
+            Err(e) => Err(std::io::Error::other(e)),
         }
     }
 
@@ -45,7 +45,7 @@ impl CacheBackend for SledStore {
         self.db
             .insert(hash.as_bytes(), content.as_bytes())
             .map(|_| ())
-            .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))
+            .map_err(std::io::Error::other)
     }
 
     fn list_hashes(&self) -> Vec<String> {

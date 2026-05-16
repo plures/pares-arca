@@ -58,29 +58,24 @@ impl AuditLog {
             metadata: metadata.to_string(),
         };
 
-        let value = serde_json::to_vec(&entry)
-            .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
+        let value = serde_json::to_vec(&entry).map_err(std::io::Error::other)?;
 
         // Use generate_id for a unique monotonic key
-        let id = self
-            .db
-            .generate_id()
-            .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
+        let id = self.db.generate_id().map_err(std::io::Error::other)?;
         let key = id.to_be_bytes();
 
         self.tree
             .insert(key, value)
             .map(|_| ())
-            .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))
+            .map_err(std::io::Error::other)
     }
 
     /// Query all events since a given timestamp (inclusive).
     pub fn query_since(&self, since_ms: u64) -> Result<Vec<AuditEntry>, std::io::Error> {
         let mut results = Vec::new();
         for item in self.tree.iter() {
-            let (_, v) = item.map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
-            let entry: AuditEntry = serde_json::from_slice(&v)
-                .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
+            let (_, v) = item.map_err(std::io::Error::other)?;
+            let entry: AuditEntry = serde_json::from_slice(&v).map_err(std::io::Error::other)?;
             if entry.timestamp_ms >= since_ms {
                 results.push(entry);
             }

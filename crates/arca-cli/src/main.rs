@@ -216,7 +216,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 .map_err(|e| format!("failed to open sled db: {e}"))?;
             Arc::new(store)
         }
-        "filesystem" | _ => {
+        "filesystem" => {
+            let store = arca_core::CacheStore::new(&cache_dir)?;
+            Arc::new(store)
+        }
+        _ => {
             let store = arca_core::CacheStore::new(&cache_dir)?;
             Arc::new(store)
         }

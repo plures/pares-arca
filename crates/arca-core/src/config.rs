@@ -38,17 +38,12 @@ pub struct CacheSegment {
 }
 
 /// Compression algorithm for NAR archives.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum Compression {
+    #[default]
     Zstd,
     Xz,
-}
-
-impl Default for Compression {
-    fn default() -> Self {
-        Compression::Zstd
-    }
 }
 
 impl std::fmt::Display for Compression {
