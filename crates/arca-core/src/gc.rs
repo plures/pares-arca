@@ -57,10 +57,7 @@ struct GcEntry {
 }
 
 /// Collect all cache entries with their metadata.
-fn collect_entries(
-    backend: &dyn CacheBackend,
-    cache_dir: &Path,
-) -> Vec<GcEntry> {
+fn collect_entries(backend: &dyn CacheBackend, cache_dir: &Path) -> Vec<GcEntry> {
     let hashes = backend.list_hashes();
     let mut entries = Vec::with_capacity(hashes.len());
 
@@ -180,7 +177,10 @@ async fn remove_entry(
 ) -> Result<(), String> {
     // Remove NAR from object store
     if let Err(e) = nar_store.delete_nar(&entry.nar_filename).await {
-        info!("Could not delete NAR {}: {e} (may be legacy filesystem)", entry.nar_filename);
+        info!(
+            "Could not delete NAR {}: {e} (may be legacy filesystem)",
+            entry.nar_filename
+        );
         // Try legacy filesystem removal
         let legacy_path = cache_dir.join("nar").join(&entry.nar_filename);
         let _ = std::fs::remove_file(legacy_path);
@@ -231,7 +231,10 @@ mod tests {
 
     #[test]
     fn test_parse_size_fractional() {
-        assert_eq!(parse_size("1.5G").unwrap(), (1.5 * 1024.0 * 1024.0 * 1024.0) as u64);
+        assert_eq!(
+            parse_size("1.5G").unwrap(),
+            (1.5 * 1024.0 * 1024.0 * 1024.0) as u64
+        );
     }
 
     #[test]

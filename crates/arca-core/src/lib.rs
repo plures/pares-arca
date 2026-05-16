@@ -23,13 +23,13 @@
 //! ```
 
 pub mod audit;
-pub mod signing;
 pub mod backend;
 pub mod config;
 pub mod error;
 pub mod gc;
 pub mod narinfo;
 pub mod object_store;
+pub mod signing;
 pub mod sled_store;
 pub mod store;
 
@@ -39,6 +39,6 @@ pub use config::{CacheConfig, CacheSegment, Compression, ConfigError, SegmentFil
 pub use error::ArcaError;
 pub use narinfo::NarInfo;
 pub use object_store::{DedupStats, NarObjectError, NarObjectStore};
+pub use signing::{generate_keypair_files, verify_narinfo_sig, CacheSigningKey};
 pub use sled_store::SledStore;
-pub use signing::{CacheSigningKey, generate_keypair_files, verify_narinfo_sig};
 pub use store::CacheStore;

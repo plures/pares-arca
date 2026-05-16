@@ -240,24 +240,29 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             arca_server::serve(server_backend, cache_dir, &bind).await?;
         }
 
-        Commands::Import { store_path, segment, signing_key, compression } => {
+        Commands::Import {
+            store_path,
+            segment,
+            signing_key,
+            compression,
+        } => {
             let config = arca_core::CacheConfig::load_or_create(&config_path)?;
-            let comp: arca_core::Compression = compression.parse()
-                .map_err(|e: String| e)?;
+            let comp: arca_core::Compression = compression.parse().map_err(|e: String| e)?;
             let seg = if let Some(ref name) = segment {
-                config.segment_by_name(name).ok_or_else(|| {
-                    format!("segment '{}' not found in config", name)
-                })?
+                config
+                    .segment_by_name(name)
+                    .ok_or_else(|| format!("segment '{}' not found in config", name))?
             } else {
-                config.segment_for_path(&store_path).ok_or_else(|| {
-                    "no matching segment for store path".to_string()
-                })?
+                config
+                    .segment_for_path(&store_path)
+                    .ok_or_else(|| "no matching segment for store path".to_string())?
             };
             println!("   Segment: {}", seg.name);
             let store = arca_core::CacheStore::new(&cache_dir)?;
 
             // Resolve signing key: CLI flag > config file
-            let key_path = signing_key.or_else(|| config.signing_key_path.as_ref().map(PathBuf::from));
+            let key_path =
+                signing_key.or_else(|| config.signing_key_path.as_ref().map(PathBuf::from));
             let info = if let Some(ref kp) = key_path {
                 let sk = arca_core::CacheSigningKey::from_file(kp)?;
                 println!("   Signing with key: {}", sk.name());
@@ -297,8 +302,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             if let Ok(stats) = nar_store.dedup_stats().await {
                 if stats.nar_count > 0 {
                     println!("   NAR objects: {}", stats.nar_count);
-                    println!("   Total NAR bytes: {:.1} KB", stats.total_nar_bytes as f64 / 1024.0);
-                    println!("   Unique chunk bytes: {:.1} KB", stats.unique_chunk_bytes as f64 / 1024.0);
+                    println!(
+                        "   Total NAR bytes: {:.1} KB",
+                        stats.total_nar_bytes as f64 / 1024.0
+                    );
+                    println!(
+                        "   Unique chunk bytes: {:.1} KB",
+                        stats.unique_chunk_bytes as f64 / 1024.0
+                    );
                     println!("   Unique chunks: {}", stats.unique_chunks);
                     println!("   Dedup ratio: {:.2}x", stats.dedup_ratio());
                 }
@@ -405,7 +416,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 let mut serve_shutdown = shutdown_tx.subscribe();
                 tokio::spawn(async move {
                     let serve_backend: Box<dyn CacheBackend> = Box::new(
-                        arca_core::CacheStore::new(&serve_dir).expect("failed to open cache store")
+                        arca_core::CacheStore::new(&serve_dir).expect("failed to open cache store"),
                     );
                     tokio::select! {
                         res = arca_server::serve(serve_backend, serve_dir, &bind) => {
@@ -461,7 +472,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             println!("   Public key: {}/{}.pub", dir.display(), name);
             println!("   Public key: {}", key.public_key_nix_format());
             println!();
-            println!("To use: add to config.toml or pass --signing-key {}/{}.secret", dir.display(), name);
+            println!(
+                "To use: add to config.toml or pass --signing-key {}/{}.secret",
+                dir.display(),
+                name
+            );
         }
 
         Commands::Gc { max_age, max_size } => {
@@ -482,7 +497,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             let mut total_freed = 0u64;
 
             if let Some(ref age_str) = max_age {
-                let dur: std::time::Duration = age_str.parse::<humantime::Duration>()
+                let dur: std::time::Duration = age_str
+                    .parse::<humantime::Duration>()
                     .map_err(|e| format!("invalid duration '{}': {}", age_str, e))?
                     .into();
                 println!("🗑️  GC: removing entries older than {age_str}");
@@ -600,10 +616,22 @@ mod tests {
 struct ArcBackendWrapper(Arc<dyn CacheBackend>);
 
 impl CacheBackend for ArcBackendWrapper {
-    fn has(&self, hash: &str) -> bool { self.0.has(hash) }
-    fn get_narinfo(&self, hash: &str) -> Result<String, std::io::Error> { self.0.get_narinfo(hash) }
-    fn put_narinfo(&self, hash: &str, content: &str) -> Result<(), std::io::Error> { self.0.put_narinfo(hash, content) }
-    fn list_hashes(&self) -> Vec<String> { self.0.list_hashes() }
-    fn count(&self) -> usize { self.0.count() }
-    fn total_narinfo_size(&self) -> u64 { self.0.total_narinfo_size() }
+    fn has(&self, hash: &str) -> bool {
+        self.0.has(hash)
+    }
+    fn get_narinfo(&self, hash: &str) -> Result<String, std::io::Error> {
+        self.0.get_narinfo(hash)
+    }
+    fn put_narinfo(&self, hash: &str, content: &str) -> Result<(), std::io::Error> {
+        self.0.put_narinfo(hash, content)
+    }
+    fn list_hashes(&self) -> Vec<String> {
+        self.0.list_hashes()
+    }
+    fn count(&self) -> usize {
+        self.0.count()
+    }
+    fn total_narinfo_size(&self) -> u64 {
+        self.0.total_narinfo_size()
+    }
 }

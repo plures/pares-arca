@@ -59,9 +59,7 @@ pub async fn serve(
 
     info!("Arca cache server listening on {bind}");
     info!("Cache directory: {}", cache_dir.display());
-    info!(
-        "Add to nix.conf: substituters = http://{bind} ; trusted-substituters = http://{bind}",
-    );
+    info!("Add to nix.conf: substituters = http://{bind} ; trusted-substituters = http://{bind}",);
 
     let listener = TcpListener::bind(bind).await?;
     axum::serve(listener, app).await?;
@@ -133,12 +131,7 @@ async fn nar_file(
         Ok(file) => {
             let stream = tokio_util::io::ReaderStream::new(file);
             let body = Body::from_stream(stream);
-            (
-                StatusCode::OK,
-                [("content-type", content_type)],
-                body,
-            )
-                .into_response()
+            (StatusCode::OK, [("content-type", content_type)], body).into_response()
         }
         Err(_) => (StatusCode::NOT_FOUND, "Not found").into_response(),
     }

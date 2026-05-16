@@ -13,12 +13,12 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 use tracing::{debug, info, warn};
 
-use crate::config::Compression;
-use crate::signing::CacheSigningKey;
 use crate::backend::CacheBackend;
+use crate::config::Compression;
 use crate::error::ArcaError;
 use crate::narinfo::NarInfo;
 use crate::object_store::NarObjectStore;
+use crate::signing::CacheSigningKey;
 
 /// On-disk binary cache store with plures-object chunked NAR storage.
 pub struct CacheStore {
@@ -46,7 +46,10 @@ impl CacheStore {
 
         let nar_store = NarObjectStore::new(&cache_dir);
 
-        Ok(Self { cache_dir, nar_store })
+        Ok(Self {
+            cache_dir,
+            nar_store,
+        })
     }
 
     /// Return the cache root path.
@@ -165,7 +168,9 @@ impl CacheStore {
         };
         tokio::task::block_in_place(|| {
             tokio::runtime::Handle::current().block_on(async {
-                self.nar_store.put_nar_typed(&nar_filename, compressed.clone(), content_type).await
+                self.nar_store
+                    .put_nar_typed(&nar_filename, compressed.clone(), content_type)
+                    .await
             })
         })
         .map_err(|e| ArcaError::Compression(format!("object store put failed: {e}")))?;

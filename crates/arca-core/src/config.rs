@@ -66,7 +66,9 @@ impl std::str::FromStr for Compression {
         match s.to_lowercase().as_str() {
             "zstd" => Ok(Compression::Zstd),
             "xz" => Ok(Compression::Xz),
-            other => Err(format!("unknown compression: {other} (expected zstd or xz)")),
+            other => Err(format!(
+                "unknown compression: {other} (expected zstd or xz)"
+            )),
         }
     }
 }
@@ -135,9 +137,7 @@ impl CacheConfig {
                     name: seg.name.clone(),
                 });
             }
-            if seg.topic_key.len() != 64
-                || !seg.topic_key.chars().all(|c| c.is_ascii_hexdigit())
-            {
+            if seg.topic_key.len() != 64 || !seg.topic_key.chars().all(|c| c.is_ascii_hexdigit()) {
                 return Err(ConfigError::InvalidTopicKey {
                     name: seg.name.clone(),
                     len: seg.topic_key.len(),

@@ -66,7 +66,8 @@ impl NarObjectStore {
         nar_filename: &str,
         data: Vec<u8>,
     ) -> Result<String, NarObjectError> {
-        self.put_nar_typed(nar_filename, data, "application/x-xz").await
+        self.put_nar_typed(nar_filename, data, "application/x-xz")
+            .await
     }
 
     /// Store a compressed NAR blob with a specific content type.
@@ -223,14 +224,8 @@ mod tests {
 
         // Store same data under two different keys
         let data = vec![42u8; 2048];
-        store
-            .put_nar("nar1.nar.xz", data.clone())
-            .await
-            .unwrap();
-        store
-            .put_nar("nar2.nar.xz", data.clone())
-            .await
-            .unwrap();
+        store.put_nar("nar1.nar.xz", data.clone()).await.unwrap();
+        store.put_nar("nar2.nar.xz", data.clone()).await.unwrap();
 
         let stats = store.dedup_stats().await.unwrap();
         assert_eq!(stats.nar_count, 2);
@@ -247,10 +242,7 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
         let store = NarObjectStore::new(tmp.path());
 
-        store
-            .put_nar("del.nar.xz", vec![7u8; 512])
-            .await
-            .unwrap();
+        store.put_nar("del.nar.xz", vec![7u8; 512]).await.unwrap();
         assert!(store.has_nar("del.nar.xz").await);
 
         store.delete_nar("del.nar.xz").await.unwrap();
@@ -262,14 +254,8 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
         let store = NarObjectStore::new(tmp.path());
 
-        store
-            .put_nar("a.nar.xz", vec![1u8; 100])
-            .await
-            .unwrap();
-        store
-            .put_nar("b.nar.xz", vec![2u8; 200])
-            .await
-            .unwrap();
+        store.put_nar("a.nar.xz", vec![1u8; 100]).await.unwrap();
+        store.put_nar("b.nar.xz", vec![2u8; 200]).await.unwrap();
 
         let nars = store.list_nars().await.unwrap();
         assert_eq!(nars.len(), 2);

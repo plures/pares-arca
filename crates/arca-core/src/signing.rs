@@ -90,7 +90,13 @@ impl CacheSigningKey {
 
     /// Build the narinfo fingerprint string.
     pub fn fingerprint(store_path: &str, nar_hash: &str, nar_size: u64, refs: &[String]) -> String {
-        format!("1;{};{};{};{}", store_path, nar_hash, nar_size, refs.join(","))
+        format!(
+            "1;{};{};{};{}",
+            store_path,
+            nar_hash,
+            nar_size,
+            refs.join(",")
+        )
     }
 
     /// Sign a narinfo. Returns `"name:base64(signature)"`.
@@ -118,10 +124,16 @@ pub fn verify_narinfo_sig(public_key_nix: &str, sig_line: &str, fingerprint: &st
         let (_sig_name, sig_b64) = sig_line.split_once(':').ok_or("bad sig format")?;
 
         let pub_bytes = B64.decode(pub_b64)?;
-        let pub_key = VerifyingKey::from_bytes(&pub_bytes.as_slice().try_into().map_err(|_| "bad pub key len")?)?;
+        let pub_key = VerifyingKey::from_bytes(
+            &pub_bytes
+                .as_slice()
+                .try_into()
+                .map_err(|_| "bad pub key len")?,
+        )?;
 
         let sig_bytes = B64.decode(sig_b64)?;
-        let sig = Signature::from_bytes(&sig_bytes.as_slice().try_into().map_err(|_| "bad sig len")?);
+        let sig =
+            Signature::from_bytes(&sig_bytes.as_slice().try_into().map_err(|_| "bad sig len")?);
 
         Ok(pub_key.verify(fingerprint.as_bytes(), &sig).is_ok())
     })();
@@ -147,10 +159,11 @@ pub fn generate_keypair_files(name: &str, dir: &Path) -> Result<CacheSigningKey,
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
-        std::fs::set_permissions(&secret_path, std::fs::Permissions::from_mode(0o600))
-            .map_err(|e| ArcaError::Signing {
+        std::fs::set_permissions(&secret_path, std::fs::Permissions::from_mode(0o600)).map_err(
+            |e| ArcaError::Signing {
                 reason: format!("failed to set permissions: {e}"),
-            })?;
+            },
+        )?;
     }
 
     let pub_path = dir.join(format!("{name}.pub"));
@@ -190,7 +203,11 @@ mod tests {
         let fp = CacheSigningKey::fingerprint("/nix/store/abc-hello", "sha256:dead", 100, &[]);
 
         // Verify with wrong key should fail
-        assert!(!verify_narinfo_sig(&key2.public_key_nix_format(), &sig, &fp));
+        assert!(!verify_narinfo_sig(
+            &key2.public_key_nix_format(),
+            &sig,
+            &fp
+        ));
     }
 
     #[test]
@@ -198,7 +215,11 @@ mod tests {
         let key = CacheSigningKey::generate("cache");
         let sig = key.sign_narinfo("/nix/store/abc-hello", "sha256:dead", 100, &[]);
         let tampered_fp = "1;/nix/store/abc-hello;sha256:dead;999;";
-        assert!(!verify_narinfo_sig(&key.public_key_nix_format(), &sig, &tampered_fp));
+        assert!(!verify_narinfo_sig(
+            &key.public_key_nix_format(),
+            &sig,
+            &tampered_fp
+        ));
     }
 
     #[test]
@@ -207,7 +228,10 @@ mod tests {
         let secret = key.secret_key_nix_format();
         let restored = CacheSigningKey::from_nix_format(&secret).unwrap();
         assert_eq!(restored.name(), "my-cache");
-        assert_eq!(restored.public_key_nix_format(), key.public_key_nix_format());
+        assert_eq!(
+            restored.public_key_nix_format(),
+            key.public_key_nix_format()
+        );
 
         // Verify restored key produces valid signatures
         let sig = restored.sign_narinfo("/nix/store/x-test", "sha256:aa", 10, &[]);

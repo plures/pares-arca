@@ -33,7 +33,10 @@ impl AuditLog {
     /// Create or open an audit log using a dedicated tree in the given sled DB.
     pub fn new(db: &sled::Db) -> Result<Self, sled::Error> {
         let tree = db.open_tree("audit_log")?;
-        Ok(Self { tree, db: db.clone() })
+        Ok(Self {
+            tree,
+            db: db.clone(),
+        })
     }
 
     /// Record an audit event. Key is big-endian timestamp + counter for ordering.
@@ -59,7 +62,9 @@ impl AuditLog {
             .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
 
         // Use generate_id for a unique monotonic key
-        let id = self.db.generate_id()
+        let id = self
+            .db
+            .generate_id()
             .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
         let key = id.to_be_bytes();
 
@@ -124,7 +129,8 @@ mod tests {
     #[test]
     fn test_query_since_filters() {
         let (_tmp, log) = make_log();
-        log.record(AuditEventType::Import, "/nix/store/a", "{}").unwrap();
+        log.record(AuditEventType::Import, "/nix/store/a", "{}")
+            .unwrap();
 
         // Query from far future — should return nothing
         let entries = log.query_since(u64::MAX).unwrap();
@@ -134,9 +140,12 @@ mod tests {
     #[test]
     fn test_multiple_events() {
         let (_tmp, log) = make_log();
-        log.record(AuditEventType::Import, "/nix/store/a", "{}").unwrap();
-        log.record(AuditEventType::Serve, "/nix/store/a", "{}").unwrap();
-        log.record(AuditEventType::SyncReceive, "/nix/store/b", "{}").unwrap();
+        log.record(AuditEventType::Import, "/nix/store/a", "{}")
+            .unwrap();
+        log.record(AuditEventType::Serve, "/nix/store/a", "{}")
+            .unwrap();
+        log.record(AuditEventType::SyncReceive, "/nix/store/b", "{}")
+            .unwrap();
 
         assert_eq!(log.len(), 3);
         assert!(!log.is_empty());
