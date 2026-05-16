@@ -1,71 +1,55 @@
-//! NAR blob storage via plures-object — content-addressed chunked storage.
+//! NAR blob storage via pluresdb — content-addressed storage.
 //!
 //! Instead of writing raw `.nar.xz` files to the filesystem, this module
-//! chunks compressed NARs through plures-object's `ObjectService`, gaining:
+//! stores compressed NARs through pluresdb's `FileBlobStore`, gaining:
 //!
-//! - **Deduplication**: identical chunks across different NARs are stored once
-//! - **Content addressing**: SHA-256 chunk IDs guarantee integrity
-//! - **Streaming retrieval**: NARs are reassembled from chunks on demand
+//! - **Content addressing**: SHA-256 blob IDs guarantee integrity
+//! - **Simple CAS layout**: two-level fan-out directory (like Git loose objects)
 //!
 //! # Layout
 //!
 //! ```text
 //! <cache_dir>/
 //!   objects/
-//!     chunks/     ← sharded content-addressed chunks (plures-chunkstore)
-//!     manifests/  ← object manifests mapping NAR keys → chunks (plures-manifest-db)
+//!     blobs/   ← sharded content-addressed blobs (pluresdb FileBlobStore)
 //! ```
 
+use std::collections::HashMap;
 use std::path::Path;
-use std::sync::Arc;
 
 use bytes::Bytes;
-use plures_chunkstore::FsChunkStore;
-use plures_manifest_db::FsManifestStore;
-use plures_object_core::{ChunkStorage, ManifestStorage, ObjectKey};
-use plures_object_store::ObjectService;
+use pluresdb_storage::{BlobStore, FileBlobStore};
 
-/// NAR object store backed by plures-object.
+/// NAR object store backed by pluresdb's `FileBlobStore`.
 pub struct NarObjectStore {
-    service: ObjectService,
-    chunks: Arc<FsChunkStore>,
-    manifests: Arc<FsManifestStore>,
+    blob_store: FileBlobStore,
+    /// Maps NAR key (e.g. `"nar/abc.nar.xz"`) to its blob hash.
+    /// Backed by a sled tree for persistence.
+    index: sled::Db,
 }
 
 impl NarObjectStore {
     /// Create a new NAR object store under `base_dir/objects/`.
     pub fn new(base_dir: impl AsRef<Path>) -> Self {
         let objects_dir = base_dir.as_ref().join("objects");
-        let chunks_dir = objects_dir.join("chunks");
-        let manifests_dir = objects_dir.join("manifests");
+        let blobs_dir = objects_dir.join("blobs");
+        let index_dir = objects_dir.join("index");
 
         // Ensure directories exist
-        std::fs::create_dir_all(&chunks_dir).ok();
-        std::fs::create_dir_all(&manifests_dir).ok();
+        std::fs::create_dir_all(&blobs_dir).ok();
+        std::fs::create_dir_all(&index_dir).ok();
 
-        let chunks = Arc::new(FsChunkStore::new(&chunks_dir));
-        let manifests = Arc::new(FsManifestStore::new(&manifests_dir));
+        let blob_store =
+            FileBlobStore::open(&blobs_dir).expect("failed to open FileBlobStore for NARs");
+        let index = sled::open(&index_dir).expect("failed to open sled index for NAR keys");
 
-        let service = ObjectService::new(
-            chunks.clone() as Arc<dyn plures_object_core::ChunkStorage>,
-            manifests.clone() as Arc<dyn plures_object_core::ManifestStorage>,
-        );
-
-        Self {
-            service,
-            chunks,
-            manifests,
-        }
+        Self { blob_store, index }
     }
 
     /// Store a compressed NAR blob, returning the object key.
     ///
     /// The key is `nar/{hash}.nar.xz` — matching the Nix substituter URL path.
-    pub async fn put_nar(
-        &self,
-        nar_filename: &str,
-        data: Vec<u8>,
-    ) -> Result<String, NarObjectError> {
+    pub async fn put_nar(&self, nar_filename: &str, data: Vec<u8>) -> anyhow::Result<String> {
         self.put_nar_typed(nar_filename, data, "application/x-xz")
             .await
     }
@@ -75,94 +59,108 @@ impl NarObjectStore {
         &self,
         nar_filename: &str,
         data: Vec<u8>,
-        content_type: &str,
-    ) -> Result<String, NarObjectError> {
+        _content_type: &str,
+    ) -> anyhow::Result<String> {
         let key = format!("nar/{nar_filename}");
-        self.service
-            .put_object(&key, Bytes::from(data), Some(content_type.into()))
-            .await
-            .map_err(NarObjectError::Object)?;
+        let hash = self.blob_store.put(&data)?;
+        // Store key → hash mapping + size
+        let meta = serde_json::to_vec(&NarMeta {
+            hash: hash.clone(),
+            size: data.len() as u64,
+        })?;
+        self.index.insert(key.as_bytes(), meta)?;
         Ok(key)
     }
 
     /// Retrieve a compressed NAR blob by filename (e.g. `abc123.nar.xz`).
-    pub async fn get_nar(&self, nar_filename: &str) -> Result<Bytes, NarObjectError> {
-        let key = ObjectKey(format!("nar/{nar_filename}"));
-        let (_meta, data) = self
-            .service
-            .get_object(&key)
-            .await
-            .map_err(NarObjectError::Object)?;
-        Ok(data)
+    pub async fn get_nar(&self, nar_filename: &str) -> anyhow::Result<Bytes> {
+        let key = format!("nar/{nar_filename}");
+        let meta = self
+            .index
+            .get(key.as_bytes())?
+            .ok_or_else(|| anyhow::anyhow!("NAR not found: {key}"))?;
+        let meta: NarMeta = serde_json::from_slice(&meta)?;
+        let data = self
+            .blob_store
+            .get(&meta.hash)?
+            .ok_or_else(|| anyhow::anyhow!("blob missing for NAR {key}: {}", meta.hash))?;
+        Ok(Bytes::from(data))
     }
 
     /// Check if a NAR blob exists in the object store.
     pub async fn has_nar(&self, nar_filename: &str) -> bool {
-        let key = ObjectKey(format!("nar/{nar_filename}"));
-        self.service.head_object(&key).await.is_ok()
+        let key = format!("nar/{nar_filename}");
+        self.index.get(key.as_bytes()).ok().flatten().is_some()
     }
 
     /// Delete a NAR blob from the object store.
-    pub async fn delete_nar(&self, nar_filename: &str) -> Result<(), NarObjectError> {
-        let key = ObjectKey(format!("nar/{nar_filename}"));
-        self.service
-            .delete_object(&key)
-            .await
-            .map_err(NarObjectError::Object)?;
+    pub async fn delete_nar(&self, nar_filename: &str) -> anyhow::Result<()> {
+        let key = format!("nar/{nar_filename}");
+        if let Some(meta_bytes) = self.index.remove(key.as_bytes())? {
+            let meta: NarMeta = serde_json::from_slice(&meta_bytes)?;
+            // Only delete the blob if no other key references it
+            let hash_still_referenced = self.index.iter().any(|entry| {
+                if let Ok((_, v)) = entry {
+                    if let Ok(m) = serde_json::from_slice::<NarMeta>(&v) {
+                        return m.hash == meta.hash;
+                    }
+                }
+                false
+            });
+            if !hash_still_referenced {
+                self.blob_store.delete(&meta.hash)?;
+            }
+        }
         Ok(())
     }
 
     /// List all NAR keys in the object store.
-    pub async fn list_nars(&self) -> Result<Vec<String>, NarObjectError> {
-        let keys = self
-            .service
-            .list_objects(Some("nar/"))
-            .await
-            .map_err(NarObjectError::Object)?;
-        Ok(keys.into_iter().map(|k| k.0).collect())
+    pub async fn list_nars(&self) -> anyhow::Result<Vec<String>> {
+        let mut keys = Vec::new();
+        for entry in self.index.iter() {
+            let (k, _) = entry?;
+            let key = String::from_utf8(k.to_vec())?;
+            if key.starts_with("nar/") {
+                keys.push(key);
+            }
+        }
+        Ok(keys)
     }
 
-    /// Get dedup statistics: total logical NAR bytes vs unique chunk bytes on disk.
-    pub async fn dedup_stats(&self) -> Result<DedupStats, NarObjectError> {
-        let keys = self
-            .service
-            .list_objects(Some("nar/"))
-            .await
-            .map_err(NarObjectError::Object)?;
-
+    /// Get dedup statistics: total logical NAR bytes vs unique blob bytes on disk.
+    pub async fn dedup_stats(&self) -> anyhow::Result<DedupStats> {
         let mut total_nar_bytes: u64 = 0;
-        let mut unique_chunk_ids = std::collections::HashSet::new();
+        let mut unique_hashes = HashMap::new();
+        let mut nar_count = 0;
 
-        for key in &keys {
-            if let Ok(meta) = self.service.head_object(key).await {
-                total_nar_bytes += meta.size;
+        for entry in self.index.iter() {
+            let (k, v) = entry?;
+            let key = String::from_utf8(k.to_vec())?;
+            if !key.starts_with("nar/") {
+                continue;
             }
-            // Collect unique chunk IDs from manifest
-            if let Ok(manifest) = self.manifests.get(key).await {
-                for part in &manifest.parts {
-                    for chunk_id in &part.chunks {
-                        unique_chunk_ids.insert(chunk_id.0.clone());
-                    }
-                }
-            }
+            nar_count += 1;
+            let meta: NarMeta = serde_json::from_slice(&v)?;
+            total_nar_bytes += meta.size;
+            unique_hashes.entry(meta.hash.clone()).or_insert(meta.size);
         }
 
-        // Sum up actual chunk sizes on disk
-        let mut unique_chunk_bytes: u64 = 0;
-        for chunk_id in &unique_chunk_ids {
-            let cid = plures_object_core::ChunkId(chunk_id.clone());
-            if let Ok(chunk) = self.chunks.get(&cid).await {
-                unique_chunk_bytes += chunk.size;
-            }
-        }
+        let unique_chunk_bytes: u64 = unique_hashes.values().sum();
 
         Ok(DedupStats {
             total_nar_bytes,
             unique_chunk_bytes,
-            nar_count: keys.len(),
-            unique_chunks: unique_chunk_ids.len(),
+            nar_count,
+            unique_chunks: unique_hashes.len(),
         })
     }
+}
+
+/// Internal metadata stored in the sled index per NAR key.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+struct NarMeta {
+    hash: String,
+    size: u64,
 }
 
 /// Deduplication statistics.
@@ -170,11 +168,11 @@ impl NarObjectStore {
 pub struct DedupStats {
     /// Total logical bytes across all stored NARs.
     pub total_nar_bytes: u64,
-    /// Actual bytes stored on disk (unique chunks only).
+    /// Actual bytes stored on disk (unique blobs only).
     pub unique_chunk_bytes: u64,
     /// Number of NAR objects.
     pub nar_count: usize,
-    /// Number of unique chunks.
+    /// Number of unique blobs.
     pub unique_chunks: usize,
 }
 
@@ -194,7 +192,7 @@ impl DedupStats {
 #[derive(Debug, thiserror::Error)]
 pub enum NarObjectError {
     #[error("object store error: {0}")]
-    Object(#[from] plures_object_core::ObjectError),
+    Store(#[from] anyhow::Error),
     #[error("IO error: {0}")]
     Io(#[from] std::io::Error),
 }
@@ -229,7 +227,7 @@ mod tests {
 
         let stats = store.dedup_stats().await.unwrap();
         assert_eq!(stats.nar_count, 2);
-        // Both NARs have identical content → same chunks → dedup ratio > 1
+        // Both NARs have identical content → same blob hash → dedup ratio >= 1.9
         assert!(
             stats.dedup_ratio() >= 1.9,
             "expected dedup ratio ~2.0, got {}",

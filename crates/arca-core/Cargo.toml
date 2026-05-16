@@ -6,6 +6,7 @@ license.workspace = true
 description = "Core library for Pares Arca — distributed Nix binary cache"
 
 [dependencies]
+anyhow = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 sha2 = { workspace = true }
@@ -18,10 +19,7 @@ xz2 = { workspace = true }
 walkdir = { workspace = true }
 tempfile = { workspace = true }
 tokio = { workspace = true }
-plures-object-core = { workspace = true }
-plures-object-store = { workspace = true }
-plures-chunkstore = { workspace = true }
-plures-manifest-db = { workspace = true }
+pluresdb-storage = { workspace = true }
 base64 = { workspace = true }
 ed25519-dalek = { workspace = true }
 sled = { workspace = true }
