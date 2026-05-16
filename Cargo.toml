@@ -24,12 +24,10 @@ walkdir = "2"
 tempfile = "3"
 snow = "0.9"
 rand = "0.8"
-pluresdb-core = { git = "https://github.com/plures/pluresdb.git", branch = "main" }
-pluresdb-storage = { git = "https://github.com/plures/pluresdb.git", branch = "main" }
-plures-object-core = { git = "https://github.com/plures/plures-object.git", branch = "main" }
-plures-object-store = { git = "https://github.com/plures/plures-object.git", branch = "main" }
-plures-chunkstore = { git = "https://github.com/plures/plures-object.git", branch = "main" }
-plures-manifest-db = { git = "https://github.com/plures/plures-object.git", branch = "main" }
+plures-object-core = { git = "https://github.com/plures/plures-object.git", rev = "a670528" }
+plures-object-store = { git = "https://github.com/plures/plures-object.git", rev = "a670528" }
+plures-chunkstore = { git = "https://github.com/plures/plures-object.git", rev = "a670528" }
+plures-manifest-db = { git = "https://github.com/plures/plures-object.git", rev = "a670528" }
 base64 = "0.22"
 ed25519-dalek = { version = "2", features = ["rand_core"] }
 sled = "0.34"
