@@ -63,11 +63,24 @@
             for path in $OUT_PATHS; do
               PARES_CACHE_DIR=${lib.escapeShellArg (toString cfg.cacheDir)} ${self.packages.${pkgs.system}.default}/bin/pares-cache import "$path" >/dev/null 2>&1 || true
             done
+
+            # Sign imported paths so Nix trusts the local substituter
+            ${lib.optionalString (cfg.secretKeyFile != null) ''
+            for path in $OUT_PATHS; do
+              ${pkgs.nix}/bin/nix store sign --key-file ${cfg.secretKeyFile} "$path" 2>/dev/null || true
+            done
+            ''}
           '';
         in
         {
           options.services.pares-arca = {
             enable = lib.mkEnableOption "Pares Arca binary cache service";
+
+            secretKeyFile = lib.mkOption {
+              type = lib.types.nullOr lib.types.path;
+              default = null;
+              description = "Path to the Nix binary cache signing secret key. Generate with: nix-store --generate-binary-cache-key <name> secret-key public-key";
+            };
 
             cacheDir = lib.mkOption {
               type = lib.types.path;
