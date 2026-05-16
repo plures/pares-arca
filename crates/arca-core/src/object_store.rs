@@ -41,7 +41,33 @@ impl NarObjectStore {
 
         let blob_store =
             FileBlobStore::open(&blobs_dir).expect("failed to open FileBlobStore for NARs");
-        let index = sled::open(&index_dir).expect("failed to open sled index for NAR keys");
+
+        // If sled can't open (stale lock from crash, corruption), remove the
+        // lock file and retry once. If that fails, wipe the index and start
+        // fresh — the index is rebuilt from narinfo files on disk.
+        let index = match sled::open(&index_dir) {
+            Ok(db) => db,
+            Err(e) => {
+                tracing::warn!("sled index open failed ({e}), attempting recovery");
+                // Remove stale lock
+                let lock_path = index_dir.join("db").join("lock");
+                if lock_path.exists() {
+                    let _ = std::fs::remove_file(&lock_path);
+                }
+                match sled::open(&index_dir) {
+                    Ok(db) => {
+                        tracing::info!("sled index recovered after removing stale lock");
+                        db
+                    }
+                    Err(e2) => {
+                        tracing::warn!("sled index still broken ({e2}), wiping and recreating");
+                        let _ = std::fs::remove_dir_all(&index_dir);
+                        std::fs::create_dir_all(&index_dir).ok();
+                        sled::open(&index_dir).expect("failed to create fresh sled index")
+                    }
+                }
+            }
+        };
 
         Self { blob_store, index }
     }
