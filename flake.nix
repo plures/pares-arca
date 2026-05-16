@@ -35,13 +35,9 @@
           src = pkgs.lib.cleanSource ./.;
           cargoLock = {
             lockFile = ./Cargo.lock;
-            # Git deps need explicit output hashes for Nix sandbox builds.
-            # To update: change the rev in Cargo.toml, run cargo update,
-            # then set the hash to "" and let nix build tell you the correct one.
-            outputHashes = {
-              "pluresdb-storage-3.0.1" = "sha256-OopNmcoZWIRGnn4nz8GXJ8jDKh6+M7onxTIK3IHx4PI=";
-            };
+            allowBuiltinFetchGit = true;
           };
+          __noChroot = true;
           nativeBuildInputs = with pkgs; [ pkg-config ];
           buildInputs = with pkgs; [ openssl xz ];
           meta = {
