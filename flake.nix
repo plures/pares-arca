@@ -11,6 +11,15 @@
   };
 
   outputs = { self, nixpkgs, flake-utils, rust-overlay }:
+    let
+      # Read version from Cargo.toml
+      cargoVersion = let
+        cargo = builtins.readFile ./Cargo.toml;
+        lines = builtins.filter (l: builtins.match ''version = ".*"'' l != null)
+          (nixpkgs.lib.splitString "\n" cargo);
+        raw = builtins.head lines;
+      in builtins.head (builtins.match ''.*"(.*)".*'' raw);
+    in
     flake-utils.lib.eachDefaultSystem (system:
       let
         overlays = [ (import rust-overlay) ];
@@ -22,11 +31,16 @@
       {
         packages.default = pkgs.rustPlatform.buildRustPackage {
           pname = "pares-cache";
-          version = "1.0.0";
-          src = ./.;
+          version = cargoVersion;
+          src = pkgs.lib.cleanSource ./.;
           cargoLock = {
             lockFile = ./Cargo.lock;
-            allowBuiltinFetchGit = true;
+            # Git deps need explicit output hashes for Nix sandbox builds.
+            # To update: change the rev in Cargo.toml, run cargo update,
+            # then set the hash to "" and let nix build tell you the correct one.
+            outputHashes = {
+              "pluresdb-storage-3.0.1" = "sha256-3Zcf/I+RNcIaEOqFOl//aY3+3c4JGhzXp3o8tKgbCwc=";
+            };
           };
           nativeBuildInputs = with pkgs; [ pkg-config ];
           buildInputs = with pkgs; [ openssl xz ];
@@ -34,6 +48,7 @@
             description = "Distributed Nix binary cache";
             homepage = "https://github.com/plures/pares-cache";
             license = pkgs.lib.licenses.mit;
+            mainProgram = "pares-cache";
           };
         };
 
