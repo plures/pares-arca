@@ -39,7 +39,7 @@
             # To update: change the rev in Cargo.toml, run cargo update,
             # then set the hash to "" and let nix build tell you the correct one.
             outputHashes = {
-              "pluresdb-storage-3.0.1" = "sha256-3Zcf/I+RNcIaEOqFOl//aY3+3c4JGhzXp3o8tKgbCwc=";
+              "pluresdb-storage-3.0.1" = "sha256-OopNmcoZWIRGnn4nz8GXJ8jDKh6+M7onxTIK3IHx4PI=";
             };
           };
           nativeBuildInputs = with pkgs; [ pkg-config ];
