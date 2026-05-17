@@ -194,9 +194,11 @@
               lib.optional cfg.openFirewall cfg.port;
 
             # Auto-configure Nix to use local cache
+            # Always use localhost for the client URL — bind address (e.g. 0.0.0.0)
+            # is for the server socket, not the client connection.
             nix.settings = {
-              substituters = [ "http://${cfg.bind}:${toString cfg.port}" ];
-              trusted-substituters = [ "http://${cfg.bind}:${toString cfg.port}" ];
+              substituters = [ "http://localhost:${toString cfg.port}" ];
+              trusted-substituters = [ "http://localhost:${toString cfg.port}" ];
             } // lib.optionalAttrs cfg.postBuildHook {
               post-build-hook = postBuildHookScript;
             };
@@ -213,10 +215,10 @@
               KEY_DIR="${cfg.signingKeyDir}"
               PUBLIC="$KEY_DIR/public-key.pem"
               CONF="$KEY_DIR/nix-trusted-key.conf"
-              if [ -f "$PUBLIC" ] && [ ! -f "$CONF" ]; then
+              if [ -f "$PUBLIC" ]; then
                 PUB_KEY=$(cat "$PUBLIC")
                 echo "trusted-public-keys = $PUB_KEY cache.nixos.org-1:6NCHdD59X431o0gWypbMrAURkbJ16ZPMQFGspcDShjY=" > "$CONF"
-                echo "[pares-arca] Nix configured to trust local cache key: $PUB_KEY"
+                echo "[pares-arca] Nix trusts local cache key: $PUB_KEY"
               fi
             '');
           });
