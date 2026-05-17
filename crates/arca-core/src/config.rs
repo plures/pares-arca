@@ -1,6 +1,6 @@
-//! Configuration for pares-cache segments.
+//! Configuration for pares-arca segments.
 //!
-//! Config file location: `~/.config/pares-cache/config.toml`
+//! Config file location: `~/.config/pares-arca/config.toml`
 
 use serde::{Deserialize, Serialize};
 use std::fs;
@@ -146,7 +146,7 @@ impl CacheConfig {
     pub fn default_path() -> PathBuf {
         dirs_next::config_dir()
             .unwrap_or_else(|| PathBuf::from("~/.config"))
-            .join("pares-cache")
+            .join("pares-arca")
             .join("config.toml")
     }
 

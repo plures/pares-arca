@@ -6,7 +6,7 @@ Accepted — 2026-04-24
 
 ## Context
 
-pares-cache currently uses a plain filesystem layout for narinfo and NAR files. The README referenced PluresDB integration but this was aspirational — no PluresDB code exists. The architecture needs to support:
+pares-arca currently uses a plain filesystem layout for narinfo and NAR files. The README referenced PluresDB integration but this was aspirational — no PluresDB code exists. The architecture needs to support:
 
 1. Multiple independent cache segments sharing one daemon
 2. Peer-to-peer replication without a central server
@@ -18,7 +18,7 @@ pares-cache currently uses a plain filesystem layout for narinfo and NAR files. 
 ### Two cache segments
 
 - **Universal** — nixpkgs and well-known public packages. Ships with a well-known topic key. This is the default segment and what most users interact with.
-- **Custom** — user-generated packages with user-generated topic keys. Requires explicit `pares-cache keygen` to create a topic key, shared out-of-band.
+- **Custom** — user-generated packages with user-generated topic keys. Requires explicit `pares-arca keygen` to create a topic key, shared out-of-band.
 
 ### Storage split
 

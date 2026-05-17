@@ -11,35 +11,35 @@ A peer-to-peer Nix binary cache with **segmented caching**, **narinfo signing**,
 Pares Arca organizes cached paths into **segments**, each with its own topic key for P2P replication:
 
 - **Universal** — nixpkgs and well-known public packages. Ships with a well-known topic key so all users share the same public cache by default.
-- **Custom** — your own packages, private builds, or team-specific derivations. Requires a unique topic key generated with `pares-cache keygen`.
+- **Custom** — your own packages, private builds, or team-specific derivations. Requires a unique topic key generated with `pares-arca keygen`.
 
-Segments are defined in `~/.config/pares-cache/config.toml` (created automatically on first run).
+Segments are defined in `~/.config/pares-arca/config.toml` (created automatically on first run).
 
 ## Installation
 
 ### Nix Flake
 
 ```bash
-nix profile install github:plures/pares-cache
+nix profile install github:plures/pares-arca
 ```
 
 ### From Source
 
 ```bash
-git clone https://github.com/plures/pares-cache.git
-cd pares-cache
+git clone https://github.com/plures/pares-arca.git
+cd pares-arca
 cargo build --release
-# Binary: target/release/pares-cache
+# Binary: target/release/pares-arca
 ```
 
 ### NixOS Module
 
 ```nix
 {
-  inputs.pares-cache.url = "github:plures/pares-cache";
+  inputs.pares-arca.url = "github:plures/pares-arca";
 
   # In your configuration:
-  imports = [ pares-cache.nixosModules.default ];
+  imports = [ pares-arca.nixosModules.default ];
 
   services.pares-arca = {
     enable = true;
@@ -55,40 +55,40 @@ The module starts a systemd service, configures Nix to use the local cache as a 
 
 ```bash
 # Import a store path (default: zstd compression)
-pares-cache import /nix/store/abc123-hello-2.12
+pares-arca import /nix/store/abc123-hello-2.12
 
 # Import with xz compression instead
-pares-cache import --compression xz /nix/store/abc123-hello-2.12
+pares-arca import --compression xz /nix/store/abc123-hello-2.12
 
 # Import and sign with ed25519 key
-pares-cache import --signing-key ~/.config/pares-cache/my-cache.secret /nix/store/abc123-hello-2.12
+pares-arca import --signing-key ~/.config/pares-arca/my-cache.secret /nix/store/abc123-hello-2.12
 
 # Import an entire flake closure
-pares-cache import-closure .
+pares-arca import-closure .
 
 # List cached paths
-pares-cache list
+pares-arca list
 
 # Check cache status (includes dedup stats)
-pares-cache status
+pares-arca status
 
 # Serve as a Nix substituter (HTTP)
-pares-cache serve --bind 127.0.0.1:5555
+pares-arca serve --bind 127.0.0.1:5555
 
 # Install the Nix post-build hook (auto-import all builds)
-sudo pares-cache install-hook
+sudo pares-arca install-hook
 
 # Generate a topic key for a custom/private segment
-pares-cache keygen
+pares-arca keygen
 
 # Generate an ed25519 signing keypair
-pares-cache sign-keygen --name my-cache
+pares-arca sign-keygen --name my-cache
 
 # Garbage collect old entries
-pares-cache gc --max-age 30d
+pares-arca gc --max-age 30d
 
 # Garbage collect to fit under a size limit
-pares-cache gc --max-size 10G
+pares-arca gc --max-size 10G
 ```
 
 ## Narinfo Signing
@@ -97,17 +97,17 @@ Nix verifies narinfo signatures to ensure cache integrity. Pares Arca supports e
 
 ```bash
 # Generate a keypair
-pares-cache sign-keygen --name my-cache
+pares-arca sign-keygen --name my-cache
 # Output:
-#   Secret key: ~/.config/pares-cache/my-cache.secret
-#   Public key: ~/.config/pares-cache/my-cache.pub
+#   Secret key: ~/.config/pares-arca/my-cache.secret
+#   Public key: ~/.config/pares-arca/my-cache.pub
 #   Public key: my-cache:Base64PublicKey==
 
 # Import with signing
-pares-cache import --signing-key ~/.config/pares-cache/my-cache.secret /nix/store/...
+pares-arca import --signing-key ~/.config/pares-arca/my-cache.secret /nix/store/...
 
 # Or set in config.toml:
-# signing_key_path = "/home/user/.config/pares-cache/my-cache.secret"
+# signing_key_path = "/home/user/.config/pares-arca/my-cache.secret"
 ```
 
 Add the public key to consumers' `nix.conf`:
@@ -126,10 +126,10 @@ Pares Arca supports **zstd** (default) and **xz** compression for NAR archives:
 
 ```bash
 # Use zstd (default)
-pares-cache import /nix/store/...
+pares-arca import /nix/store/...
 
 # Use xz for better compression ratio
-pares-cache import --compression xz /nix/store/...
+pares-arca import --compression xz /nix/store/...
 ```
 
 Set default in `config.toml`:
@@ -145,13 +145,13 @@ Remove old or excess cache entries:
 
 ```bash
 # Remove entries older than 30 days
-pares-cache gc --max-age 30d
+pares-arca gc --max-age 30d
 
 # Remove LRU entries to fit under 10 GB
-pares-cache gc --max-size 10G
+pares-arca gc --max-size 10G
 
 # Both at once
-pares-cache gc --max-age 7d --max-size 5G
+pares-arca gc --max-age 7d --max-size 5G
 ```
 
 Duration formats: `30d`, `7d`, `24h`, `1h30m`
@@ -161,11 +161,11 @@ GC removes both narinfo metadata and NAR data from the object store, and records
 
 ### Configuration
 
-The config file at `~/.config/pares-cache/config.toml` defines your cache segments:
+The config file at `~/.config/pares-arca/config.toml` defines your cache segments:
 
 ```toml
 compression = "zstd"
-# signing_key_path = "/home/user/.config/pares-cache/my-cache.secret"
+# signing_key_path = "/home/user/.config/pares-arca/my-cache.secret"
 
 [[segments]]
 name = "universal"
@@ -175,7 +175,7 @@ filter = "nixpkgs"
 
 [[segments]]
 name = "team"
-topic_key = "<output of pares-cache keygen>"
+topic_key = "<output of pares-arca keygen>"
 description = "Our team's private packages"
 filter = "custom"
 ```
@@ -189,18 +189,18 @@ filter = "custom"
 
 ```bash
 # On both machines:
-pares-cache keygen  # Share this key securely
-pares-cache sign-keygen --name team-cache  # Share public key
+pares-arca keygen  # Share this key securely
+pares-arca sign-keygen --name team-cache  # Share public key
 
-# Edit ~/.config/pares-cache/config.toml on both machines:
+# Edit ~/.config/pares-arca/config.toml on both machines:
 # Add a "team" segment with the shared key and filter = "custom"
 # Set signing_key_path to the secret key
 
 # Machine A:
-pares-cache swarm --also-serve
+pares-arca swarm --also-serve
 
 # Machine B:
-pares-cache swarm --also-serve --static-peer <machine-a-ip>:7070
+pares-arca swarm --also-serve --static-peer <machine-a-ip>:7070
 ```
 
 Then add to your `nix.conf`:
@@ -215,14 +215,14 @@ trusted-public-keys = team-cache:Base64PublicKey==
 Start a swarm node to replicate cached narinfo metadata with peers:
 
 ```bash
-pares-cache swarm --topic "my-team-key"
+pares-arca swarm --topic "my-team-key"
 ```
 
 All nodes sharing the same `--topic` string discover each other via UDP multicast, connect over Noise XX encrypted TCP, and exchange narinfo records. Only the SHA-256 hash of the topic is sent on the wire — the raw string stays private.
 
 ```bash
 # Full options
-pares-cache swarm \
+pares-arca swarm \
   --topic "my-team-key" \
   --discovery-port 7070 \
   --sync-port 7071 \
@@ -261,7 +261,7 @@ pares-cache swarm \
 | `gc --max-size <size>` | Remove LRU entries to fit under size limit |
 
 Global options:
-- `--cache-dir <path>` or `PARES_CACHE_DIR` env var (default: `~/.cache/pares-arca`)
+- `--cache-dir <path>` or `PARES_ARCA_DIR` env var (default: `~/.cache/pares-arca`)
 - `--backend filesystem|sled` — storage backend (default: `sled`)
 - `--db-path <path>` — sled database directory (default: `<cache-dir>/db`)
 
@@ -274,7 +274,7 @@ Four crates:
 | `arca-core` | Cache store, narinfo parsing, config, segment routing, signing, compression, GC, import/export, backend trait, sled store, audit log |
 | `arca-server` | Axum HTTP server implementing the Nix binary cache protocol |
 | `arca-swarm` | UDP discovery, Noise XX transport, narinfo CRDT sync, topic management |
-| `arca-cli` | CLI (`pares-cache` binary) wiring everything together |
+| `arca-cli` | CLI (`pares-arca` binary) wiring everything together |
 
 ### Storage Layout
 
@@ -297,7 +297,7 @@ Four crates:
 
 ```bash
 # Use filesystem backend
-pares-cache --backend filesystem status
+pares-arca --backend filesystem status
 ```
 
 ### Content-Addressed Storage

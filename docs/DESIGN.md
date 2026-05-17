@@ -164,7 +164,7 @@ services.pares-arca = {
 
 ```bash
 # Install via Nix profile
-nix profile install github:plures/pares-cache
+nix profile install github:plures/pares-arca
 
 # Or via the universal installer
 curl -sSL install-pares.plures.io | sh
@@ -271,7 +271,7 @@ CREATE TABLE peer_availability (
 
 ### Environment Variables
 
-- `PARES_CACHE_DIR`: Cache storage directory (default: `~/.cache/pares`)
+- `PARES_ARCA_DIR`: Cache storage directory (default: `~/.cache/pares`)
 - `PARES_LOG_LEVEL`: Logging verbosity (default: `info`)
 - `PARES_HYPERSWARM_KEY`: Override default topic key
 - `PARES_OFFLINE_MODE`: Disable peer networking (default: `false`)

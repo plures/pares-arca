@@ -30,7 +30,7 @@
       in
       {
         packages.default = pkgs.rustPlatform.buildRustPackage {
-          pname = "pares-cache";
+          pname = "pares-arca";
           version = cargoVersion;
           src = pkgs.lib.cleanSource ./.;
           cargoLock = {
@@ -42,9 +42,9 @@
           buildInputs = with pkgs; [ openssl xz ];
           meta = {
             description = "Distributed Nix binary cache";
-            homepage = "https://github.com/plures/pares-cache";
+            homepage = "https://github.com/plures/pares-arca";
             license = pkgs.lib.licenses.mit;
-            mainProgram = "pares-cache";
+            mainProgram = "pares-arca";
           };
         };
 
@@ -77,7 +77,7 @@
 
             set -f
             for path in $OUT_PATHS; do
-              PARES_CACHE_DIR=${lib.escapeShellArg (toString cfg.cacheDir)} ${self.packages.${pkgs.system}.default}/bin/pares-cache import "$path" >/dev/null 2>&1 || true
+              PARES_ARCA_DIR=${lib.escapeShellArg (toString cfg.cacheDir)} ${self.packages.${pkgs.system}.default}/bin/pares-arca import "$path" >/dev/null 2>&1 || true
             done
 
             # Sign imported paths if a signing key is available
@@ -180,11 +180,11 @@
               wantedBy = [ "multi-user.target" ];
 
               serviceConfig = {
-                ExecStart = "${self.packages.${pkgs.system}.default}/bin/pares-cache serve --bind ${cfg.bind}:${toString cfg.port}";
+                ExecStart = "${self.packages.${pkgs.system}.default}/bin/pares-arca serve --bind ${cfg.bind}:${toString cfg.port}";
                 DynamicUser = true;
                 CacheDirectory = "pares-arca";
                 StateDirectory = "pares-arca";
-                Environment = "PARES_CACHE_DIR=${cfg.cacheDir}";
+                Environment = "PARES_ARCA_DIR=${cfg.cacheDir}";
                 Restart = "on-failure";
                 RestartSec = "5s";
               };

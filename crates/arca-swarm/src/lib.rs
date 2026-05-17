@@ -119,7 +119,7 @@ pub struct SwarmConfig {
 impl Default for SwarmConfig {
     fn default() -> Self {
         Self {
-            topic: "pares-cache-default".into(),
+            topic: "pares-arca-default".into(),
             discovery_port: 7070,
             sync_port: 7071,
             http_port: 5555,

@@ -1,12 +1,12 @@
 [package]
-name = "pares-cache"
+name = "pares-arca"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
 description = "Pares Arca CLI — distributed Nix binary cache"
 
 [[bin]]
-name = "pares-cache"
+name = "pares-arca"
 path = "src/main.rs"
 
 [dependencies]

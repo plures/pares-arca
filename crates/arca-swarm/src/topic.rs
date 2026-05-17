@@ -8,7 +8,7 @@ use sha2::{Digest, Sha256};
 
 /// Domain-separation prefix used in the hash to avoid collisions with
 /// other SHA-256 usages in the codebase.
-const DOMAIN: &[u8] = b"pares-cache-topic-v1:";
+const DOMAIN: &[u8] = b"pares-arca-topic-v1:";
 
 /// Derive a 32-byte topic hash from a human-readable topic string.
 ///

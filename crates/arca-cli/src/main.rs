@@ -1,4 +1,4 @@
-//! Pares Arca CLI — `pares-cache` command.
+//! Pares Arca CLI — `pares-arca` command.
 //!
 //! Commands:
 //! - `serve` — Start the HTTP substituter server
@@ -22,12 +22,12 @@ use arca_core::CacheBackend;
 
 #[derive(Parser)]
 #[command(
-    name = "pares-cache",
+    name = "pares-arca",
     about = "Pares Arca — distributed Nix binary cache"
 )]
 struct Cli {
     /// Cache directory (default: ~/.cache/pares-arca)
-    #[arg(long, env = "PARES_CACHE_DIR")]
+    #[arg(long, env = "PARES_ARCA_DIR")]
     cache_dir: Option<PathBuf>,
 
     /// Storage backend: filesystem or sled
@@ -92,7 +92,7 @@ enum Commands {
         ///
         /// Only the SHA-256 hash of this string is sent on the wire, so the
         /// raw topic remains private.
-        #[arg(long, default_value = "pares-cache-default")]
+        #[arg(long, default_value = "pares-arca-default")]
         topic: String,
 
         /// UDP port for peer discovery announcements.
@@ -131,7 +131,7 @@ enum Commands {
         #[arg(long)]
         name: String,
 
-        /// Output directory for key files (default: ~/.config/pares-cache/)
+        /// Output directory for key files (default: ~/.config/pares-arca/)
         #[arg(long)]
         output: Option<PathBuf>,
     },
@@ -172,7 +172,7 @@ fi
 
 while IFS= read -r path; do
     [ -z "$path" ] && continue
-    PARES_CACHE_DIR={cache} {cli} import "$path" >/dev/null 2>&1 || true
+    PARES_ARCA_DIR={cache} {cli} import "$path" >/dev/null 2>&1 || true
 done <<< "$OUT_PATHS"
 "#,
         cache = cache,
@@ -323,7 +323,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         Commands::List => {
             let hashes = backend.list_hashes();
             if hashes.is_empty() {
-                println!("Cache is empty. Run `pares-cache import-closure .` to populate.");
+                println!("Cache is empty. Run `pares-arca import-closure .` to populate.");
             } else {
                 for hash in &hashes {
                     // Try to extract StorePath from narinfo content
@@ -468,7 +468,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             let dir = output.unwrap_or_else(|| {
                 dirs_next::config_dir()
                     .unwrap_or_else(|| PathBuf::from("~/.config"))
-                    .join("pares-cache")
+                    .join("pares-arca")
             });
             let key = arca_core::generate_keypair_files(&name, &dir)?;
             println!("✅ Generated signing keypair");
@@ -555,12 +555,11 @@ mod tests {
     #[test]
     fn test_post_build_hook_script_uses_cli_and_cache_dir() {
         let script = post_build_hook_script(
-            Path::new("/bin/pares-cache"),
+            Path::new("/bin/pares-arca"),
             Path::new("/var/cache/pares-arca"),
         );
-        assert!(script.contains(
-            "PARES_CACHE_DIR='/var/cache/pares-arca' '/bin/pares-cache' import \"$path\""
-        ));
+        assert!(script
+            .contains("PARES_ARCA_DIR='/var/cache/pares-arca' '/bin/pares-arca' import \"$path\""));
         assert!(script.contains("while IFS= read -r path; do"));
     }
 
@@ -570,17 +569,17 @@ mod tests {
             .duration_since(UNIX_EPOCH)
             .expect("system time should be after unix epoch")
             .as_nanos();
-        let base = std::env::temp_dir().join(format!("pares-cache-install-hook-{nonce}"));
+        let base = std::env::temp_dir().join(format!("pares-arca-install-hook-{nonce}"));
         let path = base.join("post-build-hook");
         install_post_build_hook(
             &path,
-            Path::new("/bin/pares-cache"),
+            Path::new("/bin/pares-arca"),
             Path::new("/var/cache/pares-arca"),
         )
         .expect("install should succeed");
 
         let contents = fs::read_to_string(&path).expect("hook script should be readable");
-        assert!(contents.contains("/bin/pares-cache"));
+        assert!(contents.contains("/bin/pares-arca"));
         assert!(contents.contains("/var/cache/pares-arca"));
 
         #[cfg(unix)]

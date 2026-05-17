@@ -6,15 +6,15 @@ Accepted — 2026-04-24
 
 ## Context
 
-The current `arca-swarm` topic is a human-readable string (default: `pares-cache-default`) hashed with SHA-256 before use on the wire. This means anyone who guesses the topic string can join the swarm and read/write cache data. For a public nixpkgs cache this is acceptable, but for private/custom caches it is not.
+The current `arca-swarm` topic is a human-readable string (default: `pares-arca-default`) hashed with SHA-256 before use on the wire. This means anyone who guesses the topic string can join the swarm and read/write cache data. For a public nixpkgs cache this is acceptable, but for private/custom caches it is not.
 
 ## Decision
 
 ### Topic keys are 256-bit random
 
-- Generated via `pares-cache keygen` using OS CSPRNG (`OsRng`)
+- Generated via `pares-arca keygen` using OS CSPRNG (`OsRng`)
 - Output as 64-character hex string
-- Stored in config file at `~/.config/pares-cache/config.toml`
+- Stored in config file at `~/.config/pares-arca/config.toml`
 
 ### Universal nixpkgs topic uses a well-known key
 
@@ -24,7 +24,7 @@ The current `arca-swarm` topic is a human-readable string (default: `pares-cache
 
 ### Custom topics require explicitly generated keys
 
-- `pares-cache keygen` generates a key
+- `pares-arca keygen` generates a key
 - User shares the key out-of-band (paste, secret manager, agenix)
 - Config file stores topic+key pairs per segment
 

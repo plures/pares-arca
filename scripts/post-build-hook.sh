@@ -11,8 +11,8 @@
 
 set -euo pipefail
 
-CONFIG_FILE="${PARES_CACHE_CONFIG:-${XDG_CONFIG_HOME:-$HOME/.config}/pares-cache/config.toml}"
-CACHE_DIR="${PARES_CACHE_DIR:-$HOME/.cache/pares-arca}"
+CONFIG_FILE="${PARES_ARCA_CONFIG:-${XDG_CONFIG_HOME:-$HOME/.config}/pares-arca/config.toml}"
+CACHE_DIR="${PARES_ARCA_DIR:-$HOME/.cache/pares-arca}"
 LOG="/tmp/pares-arca-hook.log"
 
 # Determine if a store path is from nixpkgs.
@@ -65,7 +65,7 @@ while IFS= read -r path; do
     segment=$(get_segment "$path")
     echo "[$(date -Iseconds)] Caching: $path → segment=$segment" >> "$LOG"
 
-    if command -v pares-cache &>/dev/null; then
-        PARES_CACHE_DIR="$CACHE_DIR" pares-cache import --segment "$segment" "$path" >/dev/null 2>&1 || true
+    if command -v pares-arca &>/dev/null; then
+        PARES_ARCA_DIR="$CACHE_DIR" pares-arca import --segment "$segment" "$path" >/dev/null 2>&1 || true
     fi
 done <<< "$OUT_PATHS"

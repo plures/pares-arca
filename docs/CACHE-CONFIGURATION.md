@@ -16,17 +16,17 @@ This guide covers three deployment scenarios:
 
 ### NixOS Flake
 
-Add pares-cache as a flake input and enable the service:
+Add pares-arca as a flake input and enable the service:
 
 ```nix
 # flake.nix
-inputs.pares-cache.url = "github:plures/pares-cache";
-inputs.pares-cache.inputs.nixpkgs.follows = "nixpkgs";
+inputs.pares-arca.url = "github:plures/pares-arca";
+inputs.pares-arca.inputs.nixpkgs.follows = "nixpkgs";
 ```
 
 ```nix
 # configuration.nix
-imports = [ inputs.pares-cache.nixosModules.default ];
+imports = [ inputs.pares-arca.nixosModules.default ];
 
 services.pares-arca = {
   enable = true;
@@ -46,21 +46,21 @@ Every subsequent `nix build` or `nixos-rebuild` checks the local cache first.
 
 ```bash
 # Install
-nix profile install github:plures/pares-cache
+nix profile install github:plures/pares-arca
 
 # Generate signing key
 nix-store --generate-binary-cache-key $(hostname)-1 \
-  ~/.config/pares-cache/secret-key.pem \
-  ~/.config/pares-cache/public-key.pem
+  ~/.config/pares-arca/secret-key.pem \
+  ~/.config/pares-arca/public-key.pem
 
 # Start the cache server
-pares-cache serve --bind 127.0.0.1:5555 &
+pares-arca serve --bind 127.0.0.1:5555 &
 
 # Add to ~/.config/nix/nix.conf
 cat >> ~/.config/nix/nix.conf <<EOF
 substituters = http://127.0.0.1:5555 https://cache.nixos.org
-trusted-public-keys = $(cat ~/.config/pares-cache/public-key.pem) cache.nixos.org-1:6NCHdD59X431o0gWypbMrAURkbJ16ZPMQFGspcDShjY=
-post-build-hook = $(which pares-cache) import
+trusted-public-keys = $(cat ~/.config/pares-arca/public-key.pem) cache.nixos.org-1:6NCHdD59X431o0gWypbMrAURkbJ16ZPMQFGspcDShjY=
+post-build-hook = $(which pares-arca) import
 EOF
 ```
 
@@ -71,7 +71,7 @@ EOF
 nix build nixpkgs#hello
 
 # Import it
-pares-cache import $(nix build nixpkgs#hello --print-out-paths --no-link)
+pares-arca import $(nix build nixpkgs#hello --print-out-paths --no-link)
 
 # Check the cache serves it
 curl -s http://127.0.0.1:5555/nix-cache-info
@@ -107,7 +107,7 @@ systemd.services.pares-arca-swarm = {
   wants = [ "network-online.target" ];
 
   serviceConfig = {
-    ExecStart = "${inputs.pares-cache.packages.${pkgs.system}.default}/bin/pares-cache swarm --topic plures-public-cache --discovery-port 7070 --sync-port 7071";
+    ExecStart = "${inputs.pares-arca.packages.${pkgs.system}.default}/bin/pares-arca swarm --topic plures-public-cache --discovery-port 7070 --sync-port 7071";
     Restart = "on-failure";
     RestartSec = 10;
   };
@@ -134,7 +134,7 @@ If you maintain a package set (e.g., a NUR repo) and want a dedicated public cac
 
 ```bash
 # Generate a topic key for your segment
-pares-cache keygen --name "my-packages"
+pares-arca keygen --name "my-packages"
 # → Topic key: a1b2c3d4...
 
 # Share this topic key with your users
@@ -143,7 +143,7 @@ pares-cache keygen --name "my-packages"
 Users add it to their config:
 
 ```toml
-# ~/.config/pares-cache/config.toml
+# ~/.config/pares-arca/config.toml
 [[segments]]
 name = "my-packages"
 topic = "a1b2c3d4..."
@@ -159,11 +159,11 @@ Private caches keep builds confidential. Narinfo metadata and NAR blobs are only
 
 ```bash
 # Topic key — identifies the swarm (who can discover peers)
-pares-cache keygen --name "acme-corp"
+pares-arca keygen --name "acme-corp"
 # → Topic key: deadbeef...
 
 # Shared encryption key — encrypts swarm traffic (who can read data)
-pares-cache keygen --name "acme-corp-secret" --sea
+pares-arca keygen --name "acme-corp-secret" --sea
 # → SEA key: cafebabe...
 ```
 
@@ -183,7 +183,7 @@ systemd.services.pares-arca-swarm-private = {
   wants = [ "network-online.target" ];
 
   serviceConfig = {
-    ExecStart = "${inputs.pares-cache.packages.${pkgs.system}.default}/bin/pares-cache swarm --topic deadbeef... --shared-key-file /run/agenix/acme-swarm-key --discovery-port 7080 --sync-port 7081";
+    ExecStart = "${inputs.pares-arca.packages.${pkgs.system}.default}/bin/pares-arca swarm --topic deadbeef... --shared-key-file /run/agenix/acme-swarm-key --discovery-port 7080 --sync-port 7081";
     Restart = "on-failure";
     RestartSec = 10;
   };
@@ -221,13 +221,13 @@ agenix -e secrets/acme-swarm-key.age
 
 ```bash
 export PARES_SYNC_SHARED_KEY="cafebabe..."
-pares-cache swarm --topic deadbeef...
+pares-arca swarm --topic deadbeef...
 ```
 
 **Option C: Config file**
 
 ```toml
-# ~/.config/pares-cache/config.toml
+# ~/.config/pares-arca/config.toml
 [[segments]]
 name = "acme-corp"
 topic = "deadbeef..."
@@ -270,7 +270,7 @@ Both share the same local cache directory and HTTP server. The swarm determines 
 | `signingKeyDir` | path | `/var/lib/pares-arca/signing` | Directory for auto-generated keys |
 | `secretKeyFile` | path | `null` | Explicit signing key (overrides auto) |
 
-### Config File (`~/.config/pares-cache/config.toml`)
+### Config File (`~/.config/pares-arca/config.toml`)
 
 ```toml
 # Default segment — always present
@@ -294,7 +294,7 @@ shared_key_file = "/path/to/sea-key"
 
 | Variable | Description |
 |----------|-------------|
-| `PARES_CACHE_DIR` | Override cache directory |
+| `PARES_ARCA_DIR` | Override cache directory |
 | `PARES_SYNC_SHARED_KEY` | SEA encryption key for swarm |
 | `PARES_NIX_HOST` | Hostname for signing key generation |
 
