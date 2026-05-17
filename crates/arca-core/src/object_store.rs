@@ -35,16 +35,28 @@ impl NarObjectStore {
         let blobs_dir = objects_dir.join("blobs");
         let index_dir = objects_dir.join("index");
 
-        // Ensure directories exist — log errors instead of silently ignoring
-        if let Err(e) = std::fs::create_dir_all(&blobs_dir) {
-            tracing::warn!("failed to create blobs dir {}: {e}", blobs_dir.display());
-        }
-        if let Err(e) = std::fs::create_dir_all(&index_dir) {
-            tracing::warn!("failed to create index dir {}: {e}", index_dir.display());
+        // Ensure directories exist — if permission denied, wipe and retry
+        for dir in [&objects_dir, &blobs_dir, &index_dir] {
+            if let Err(e) = std::fs::create_dir_all(dir) {
+                tracing::warn!("failed to create {}: {e}, attempting cleanup", dir.display());
+                let _ = std::fs::remove_dir_all(&objects_dir);
+                if let Err(e2) = std::fs::create_dir_all(dir) {
+                    tracing::error!("still cannot create {}: {e2}", dir.display());
+                }
+            }
         }
 
-        let blob_store =
-            FileBlobStore::open(&blobs_dir).expect("failed to open FileBlobStore for NARs");
+        let blob_store = match FileBlobStore::open(&blobs_dir) {
+            Ok(bs) => bs,
+            Err(e) => {
+                tracing::warn!("FileBlobStore open failed ({e}), wiping objects dir and retrying");
+                let _ = std::fs::remove_dir_all(&objects_dir);
+                let _ = std::fs::create_dir_all(&blobs_dir);
+                let _ = std::fs::create_dir_all(&index_dir);
+                FileBlobStore::open(&blobs_dir)
+                    .expect("FileBlobStore failed even after wipe — cannot start")
+            }
+        };
 
         let index = Self::open_sled_with_recovery(&index_dir);
 
