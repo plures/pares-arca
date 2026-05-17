@@ -204,6 +204,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let db_path = cli.db_path.unwrap_or_else(|| cache_dir.join("db"));
 
     // Build the selected backend for metadata operations.
+    // For the `serve` command with filesystem backend, use the lightweight
+    // FsNarinfoStore so that serve() can open its own NarObjectStore without
+    // a sled lock conflict.
+    let is_serve = matches!(cli.command, Commands::Serve { .. });
     let backend: Arc<dyn CacheBackend> = match cli.backend.as_str() {
         "sled" => {
             // Remove stale lock file if it exists (common after crashes)
@@ -216,13 +220,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 .map_err(|e| format!("failed to open sled db: {e}"))?;
             Arc::new(store)
         }
-        "filesystem" => {
-            let store = arca_core::CacheStore::new(&cache_dir)?;
-            Arc::new(store)
-        }
         _ => {
-            let store = arca_core::CacheStore::new(&cache_dir)?;
-            Arc::new(store)
+            if is_serve {
+                Arc::new(arca_core::FsNarinfoStore::new(&cache_dir))
+            } else {
+                let store = arca_core::CacheStore::new(&cache_dir)?;
+                Arc::new(store)
+            }
         }
     };
 
@@ -233,15 +237,16 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             for seg in &config.segments {
                 println!("   • {} ({:?})", seg.name, seg.filter);
             }
-            // Reuse the global backend — don't open sled twice (causes lock conflict)
+            // Use FsNarinfoStore for the backend — it only does narinfo file ops.
+            // serve() creates its own NarObjectStore, so using CacheStore here would
+            // create a duplicate sled instance causing a WouldBlock lock error.
             let server_backend: Box<dyn CacheBackend> = match cli.backend.as_str() {
                 "sled" => {
-                    // Clone the Arc'd backend into a Box via a wrapper
                     Box::new(ArcBackendWrapper(Arc::clone(&backend)))
                 }
-                _ => Box::new(arca_core::CacheStore::new(&cache_dir)?),
+                _ => Box::new(arca_core::FsNarinfoStore::new(&cache_dir)),
             };
-            arca_server::serve(server_backend, cache_dir, &bind).await?;
+            arca_server::serve(server_backend, cache_dir, None, &bind).await?;
         }
 
         Commands::Import {
@@ -420,10 +425,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 let mut serve_shutdown = shutdown_tx.subscribe();
                 tokio::spawn(async move {
                     let serve_backend: Box<dyn CacheBackend> = Box::new(
-                        arca_core::CacheStore::new(&serve_dir).expect("failed to open cache store"),
+                        arca_core::FsNarinfoStore::new(&serve_dir),
                     );
                     tokio::select! {
-                        res = arca_server::serve(serve_backend, serve_dir, &bind) => {
+                        res = arca_server::serve(serve_backend, serve_dir, None, &bind) => {
                             if let Err(e) = res { tracing::error!("HTTP server error: {e}"); }
                         }
                         _ = serve_shutdown.recv() => {}

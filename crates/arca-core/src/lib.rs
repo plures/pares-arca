@@ -41,4 +41,4 @@ pub use narinfo::NarInfo;
 pub use object_store::{DedupStats, NarObjectError, NarObjectStore};
 pub use signing::{generate_keypair_files, verify_narinfo_sig, CacheSigningKey};
 pub use sled_store::SledStore;
-pub use store::CacheStore;
+pub use store::{CacheStore, FsNarinfoStore};

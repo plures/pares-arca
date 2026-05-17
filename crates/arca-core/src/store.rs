@@ -62,6 +62,13 @@ impl CacheStore {
         &self.nar_store
     }
 
+    /// Decompose into cache directory and NAR object store.
+    /// Use when handing the NarObjectStore to `serve()` to avoid
+    /// opening a duplicate sled instance.
+    pub fn into_parts(self) -> (PathBuf, NarObjectStore) {
+        (self.cache_dir, self.nar_store)
+    }
+
     /// Check if a store path is already cached (by its hash prefix).
     pub fn has(&self, hash: &str) -> bool {
         self.cache_dir.join(format!("{hash}.narinfo")).exists()
@@ -444,5 +451,58 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
         let store = CacheStore::new(tmp.path().join("cache")).unwrap();
         assert!(!store.has("nonexistent"));
+    }
+}
+
+/// Lightweight narinfo-only filesystem backend.
+/// Use when the NarObjectStore is managed separately (e.g., by `serve()`).
+pub struct FsNarinfoStore {
+    cache_dir: PathBuf,
+}
+
+impl FsNarinfoStore {
+    pub fn new(cache_dir: impl Into<PathBuf>) -> Self {
+        Self { cache_dir: cache_dir.into() }
+    }
+}
+
+impl CacheBackend for FsNarinfoStore {
+    fn has(&self, hash: &str) -> bool {
+        self.cache_dir.join(format!("{hash}.narinfo")).exists()
+    }
+
+    fn get_narinfo(&self, hash: &str) -> Result<String, std::io::Error> {
+        std::fs::read_to_string(self.cache_dir.join(format!("{hash}.narinfo")))
+    }
+
+    fn put_narinfo(&self, hash: &str, content: &str) -> Result<(), std::io::Error> {
+        std::fs::write(self.cache_dir.join(format!("{hash}.narinfo")), content)
+    }
+
+    fn list_hashes(&self) -> Vec<String> {
+        std::fs::read_dir(&self.cache_dir)
+            .into_iter()
+            .flatten()
+            .filter_map(|e| e.ok())
+            .filter_map(|e| {
+                let name = e.file_name().to_string_lossy().to_string();
+                name.strip_suffix(".narinfo").map(String::from)
+            })
+            .collect()
+    }
+
+    fn count(&self) -> usize {
+        self.list_hashes().len()
+    }
+
+    fn total_narinfo_size(&self) -> u64 {
+        std::fs::read_dir(&self.cache_dir)
+            .into_iter()
+            .flatten()
+            .filter_map(|e| e.ok())
+            .filter(|e| e.file_name().to_string_lossy().ends_with(".narinfo"))
+            .filter_map(|e| e.metadata().ok())
+            .map(|m| m.len())
+            .sum()
     }
 }

@@ -38,9 +38,10 @@ struct AppState {
 pub async fn serve(
     backend: Box<dyn CacheBackend>,
     cache_dir: PathBuf,
+    nar_store: Option<NarObjectStore>,
     bind: &str,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    let nar_store = NarObjectStore::new(&cache_dir);
+    let nar_store = nar_store.unwrap_or_else(|| NarObjectStore::new(&cache_dir));
     let nar_dir = cache_dir.join("nar");
     let state = Arc::new(AppState {
         backend,
