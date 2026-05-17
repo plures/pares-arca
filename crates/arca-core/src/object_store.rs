@@ -35,11 +35,16 @@ impl NarObjectStore {
         let blobs_dir = objects_dir.join("blobs");
         let index_dir = objects_dir.join("index");
 
-        // Ensure directories exist — if permission denied, wipe and retry
+        // Ensure directories exist — if something blocks the path, remove it and retry
         for dir in [&objects_dir, &blobs_dir, &index_dir] {
             if let Err(e) = std::fs::create_dir_all(dir) {
                 tracing::warn!("failed to create {}: {e}, attempting cleanup", dir.display());
-                let _ = std::fs::remove_dir_all(&objects_dir);
+                // Remove whatever is blocking (could be a file or dir with wrong perms)
+                if objects_dir.is_dir() {
+                    let _ = std::fs::remove_dir_all(&objects_dir);
+                } else if objects_dir.exists() {
+                    let _ = std::fs::remove_file(&objects_dir);
+                }
                 if let Err(e2) = std::fs::create_dir_all(dir) {
                     tracing::error!("still cannot create {}: {e2}", dir.display());
                 }
@@ -50,11 +55,29 @@ impl NarObjectStore {
             Ok(bs) => bs,
             Err(e) => {
                 tracing::warn!("FileBlobStore open failed ({e}), wiping objects dir and retrying");
-                let _ = std::fs::remove_dir_all(&objects_dir);
+                // Remove objects_dir whether it's a dir or a file blocking the path
+                if objects_dir.is_dir() {
+                    let _ = std::fs::remove_dir_all(&objects_dir);
+                } else {
+                    let _ = std::fs::remove_file(&objects_dir);
+                }
                 let _ = std::fs::create_dir_all(&blobs_dir);
                 let _ = std::fs::create_dir_all(&index_dir);
-                FileBlobStore::open(&blobs_dir)
-                    .expect("FileBlobStore failed even after wipe — cannot start")
+                match FileBlobStore::open(&blobs_dir) {
+                    Ok(bs) => bs,
+                    Err(e2) => {
+                        // Last resort: use a tempdir for blobs too
+                        tracing::error!("FileBlobStore still failing ({e2}), falling back to tempdir");
+                        use std::sync::atomic::{AtomicU64, Ordering};
+                        static BLOB_COUNTER: AtomicU64 = AtomicU64::new(0);
+                        let n = BLOB_COUNTER.fetch_add(1, Ordering::Relaxed);
+                        let tmp_blobs = std::env::temp_dir()
+                            .join(format!("pares-arca-blobs-{}-{n}", std::process::id()));
+                        let _ = std::fs::create_dir_all(&tmp_blobs);
+                        FileBlobStore::open(&tmp_blobs)
+                            .expect("FileBlobStore failed even in tempdir — cannot start")
+                    }
+                }
             }
         };
 
@@ -334,5 +357,77 @@ mod tests {
         assert_eq!(nars.len(), 2);
         assert!(nars.iter().any(|k| k.contains("a.nar.xz")));
         assert!(nars.iter().any(|k| k.contains("b.nar.xz")));
+    }
+
+    #[tokio::test]
+    async fn test_recovery_from_corrupted_sled_index() {
+        // Simulate: sled DB exists but is corrupted (junk data)
+        let tmp = tempfile::tempdir().unwrap();
+        let objects_dir = tmp.path().join("objects");
+        let index_dir = objects_dir.join("index");
+        std::fs::create_dir_all(&index_dir).unwrap();
+
+        // Write junk into the sled DB file to corrupt it
+        std::fs::write(index_dir.join("db"), b"corrupted garbage data here").unwrap();
+        std::fs::write(index_dir.join("conf"), b"not a real config").unwrap();
+
+        // NarObjectStore::new should recover, not panic
+        let store = NarObjectStore::new(tmp.path());
+
+        // Should be functional after recovery
+        store.put_nar("recovered.nar.xz", vec![1u8; 100]).await.unwrap();
+        assert!(store.has_nar("recovered.nar.xz").await);
+    }
+
+    #[tokio::test]
+    async fn test_recovery_from_readonly_objects_dir() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let tmp = tempfile::tempdir().unwrap();
+        let objects_dir = tmp.path().join("objects");
+        let blobs_dir = objects_dir.join("blobs");
+        let index_dir = objects_dir.join("index");
+
+        // Create dirs, then make objects/ read-only to simulate permission denied
+        std::fs::create_dir_all(&blobs_dir).unwrap();
+        std::fs::create_dir_all(&index_dir).unwrap();
+
+        // Write a sled DB, then make its dir unwritable
+        let _db = sled::open(&index_dir).unwrap();
+        drop(_db);
+        std::fs::set_permissions(&index_dir, std::fs::Permissions::from_mode(0o444)).unwrap();
+
+        // NarObjectStore::new should not panic — it should recover via wipe or tempdir
+        let store = NarObjectStore::new(tmp.path());
+
+        // Restore permissions for cleanup
+        std::fs::set_permissions(&index_dir, std::fs::Permissions::from_mode(0o755)).unwrap();
+
+        // Store should be functional (maybe degraded via tempdir, but alive)
+        let stats = store.dedup_stats().await.unwrap();
+        assert_eq!(stats.nar_count, 0); // empty but working
+    }
+
+    #[tokio::test]
+    async fn test_multiple_instances_no_lock_conflict() {
+        // Simulate: two NarObjectStores created with a broken base dir
+        // Both should fall back to unique tempdirs without deadlocking
+        let tmp = tempfile::tempdir().unwrap();
+        let bad_dir = tmp.path().join("nope");
+        // Don't create bad_dir — but create a file there so mkdir fails
+        std::fs::write(&bad_dir, b"not a directory").unwrap();
+
+        // Both should survive (via tempdir fallback)
+        let store1 = NarObjectStore::new(&bad_dir);
+        let store2 = NarObjectStore::new(&bad_dir);
+
+        // Both should be independently functional
+        store1.put_nar("s1.nar.xz", vec![1u8; 50]).await.unwrap();
+        store2.put_nar("s2.nar.xz", vec![2u8; 50]).await.unwrap();
+        assert!(store1.has_nar("s1.nar.xz").await);
+        assert!(store2.has_nar("s2.nar.xz").await);
+        // They don't share state
+        assert!(!store1.has_nar("s2.nar.xz").await);
+        assert!(!store2.has_nar("s1.nar.xz").await);
     }
 }
