@@ -102,10 +102,12 @@ impl NarObjectStore {
         }
 
         // Attempt 4: last resort — use a temporary directory so the server still starts.
-        // The index will be empty (no object store lookups) but narinfo + legacy nar/
-        // serving still works. The temp index is lost on restart, which is fine since
-        // the on-disk index was already broken.
-        let tmp = std::env::temp_dir().join(format!("pares-arca-sled-{}", std::process::id()));
+        // Use a unique suffix to avoid lock conflicts when multiple NarObjectStores
+        // are created in the same process.
+        use std::sync::atomic::{AtomicU64, Ordering};
+        static COUNTER: AtomicU64 = AtomicU64::new(0);
+        let n = COUNTER.fetch_add(1, Ordering::Relaxed);
+        let tmp = std::env::temp_dir().join(format!("pares-arca-sled-{}-{n}", std::process::id()));
         let _ = std::fs::create_dir_all(&tmp);
         match sled::open(&tmp) {
             Ok(db) => {
