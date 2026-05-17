@@ -202,16 +202,15 @@
             };
 
             # post-build-hook is a top-level nix option, not under settings
-            nix.extraOptions = lib.mkIf cfg.postBuildHook ''
-              post-build-hook = ${postBuildHookScript}
-            '';
-
-            # Trust the auto-generated signing key via a nix config snippet.
-            # The public key file is read at activation time (not build time)
-            # so it works even when the key is generated on first boot.
-            nix.extraOptions = lib.mkIf (cfg.autoSigningKey && cfg.secretKeyFile == null) ''
-              !include ${cfg.signingKeyDir}/nix-trusted-key.conf
-            '';
+            # Merge with trust-key include into a single extraOptions block
+            nix.extraOptions = lib.mkMerge [
+              (lib.mkIf cfg.postBuildHook ''
+                post-build-hook = ${postBuildHookScript}
+              '')
+              (lib.mkIf (cfg.autoSigningKey && cfg.secretKeyFile == null) ''
+                !include ${cfg.signingKeyDir}/nix-trusted-key.conf
+              '')
+            ];
 
             # Generate a nix config snippet alongside the key pair
             system.activationScripts.pares-arca-trust-key = lib.mkIf (cfg.autoSigningKey && cfg.secretKeyFile == null) (lib.stringAfter [ "pares-arca-signing-key" ] ''
