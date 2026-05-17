@@ -199,9 +199,12 @@
             nix.settings = {
               substituters = [ "http://localhost:${toString cfg.port}" ];
               trusted-substituters = [ "http://localhost:${toString cfg.port}" ];
-            } // lib.optionalAttrs cfg.postBuildHook {
-              post-build-hook = postBuildHookScript;
             };
+
+            # post-build-hook is a top-level nix option, not under settings
+            nix.extraOptions = lib.mkIf cfg.postBuildHook ''
+              post-build-hook = ${postBuildHookScript}
+            '';
 
             # Trust the auto-generated signing key via a nix config snippet.
             # The public key file is read at activation time (not build time)
