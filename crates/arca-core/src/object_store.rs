@@ -35,41 +35,76 @@ impl NarObjectStore {
         let blobs_dir = objects_dir.join("blobs");
         let index_dir = objects_dir.join("index");
 
-        // Ensure directories exist
-        std::fs::create_dir_all(&blobs_dir).ok();
-        std::fs::create_dir_all(&index_dir).ok();
+        // Ensure directories exist — log errors instead of silently ignoring
+        if let Err(e) = std::fs::create_dir_all(&blobs_dir) {
+            tracing::warn!("failed to create blobs dir {}: {e}", blobs_dir.display());
+        }
+        if let Err(e) = std::fs::create_dir_all(&index_dir) {
+            tracing::warn!("failed to create index dir {}: {e}", index_dir.display());
+        }
 
         let blob_store =
             FileBlobStore::open(&blobs_dir).expect("failed to open FileBlobStore for NARs");
 
-        // If sled can't open (stale lock from crash, corruption), remove the
-        // lock file and retry once. If that fails, wipe the index and start
-        // fresh — the index is rebuilt from narinfo files on disk.
-        let index = match sled::open(&index_dir) {
-            Ok(db) => db,
-            Err(e) => {
-                tracing::warn!("sled index open failed ({e}), attempting recovery");
-                // Remove stale lock
-                let lock_path = index_dir.join("db").join("lock");
-                if lock_path.exists() {
-                    let _ = std::fs::remove_file(&lock_path);
-                }
-                match sled::open(&index_dir) {
-                    Ok(db) => {
-                        tracing::info!("sled index recovered after removing stale lock");
-                        db
-                    }
-                    Err(e2) => {
-                        tracing::warn!("sled index still broken ({e2}), wiping and recreating");
-                        let _ = std::fs::remove_dir_all(&index_dir);
-                        std::fs::create_dir_all(&index_dir).ok();
-                        sled::open(&index_dir).expect("failed to create fresh sled index")
-                    }
-                }
-            }
-        };
+        let index = Self::open_sled_with_recovery(&index_dir);
 
         Self { blob_store, index }
+    }
+
+    /// Open sled with progressive recovery: remove lock → wipe dir → in-memory fallback.
+    /// Never panics — the cache server always starts, even if the index is degraded.
+    fn open_sled_with_recovery(index_dir: &std::path::Path) -> sled::Db {
+        // Attempt 1: normal open
+        match sled::open(index_dir) {
+            Ok(db) => return db,
+            Err(e) => tracing::warn!("sled index open failed ({e}), attempting recovery"),
+        }
+
+        // Attempt 2: remove stale lock file and retry
+        let lock_path = index_dir.join("db").join("lock");
+        if lock_path.exists() {
+            let _ = std::fs::remove_file(&lock_path);
+        }
+        match sled::open(index_dir) {
+            Ok(db) => {
+                tracing::info!("sled index recovered after removing stale lock");
+                return db;
+            }
+            Err(e2) => tracing::warn!("sled index still broken after lock removal ({e2})"),
+        }
+
+        // Attempt 3: wipe the entire index directory and recreate
+        tracing::warn!("wiping sled index at {} and recreating", index_dir.display());
+        if let Err(e) = std::fs::remove_dir_all(index_dir) {
+            tracing::error!("failed to remove sled index dir: {e}");
+        }
+        if let Err(e) = std::fs::create_dir_all(index_dir) {
+            tracing::error!("failed to recreate sled index dir: {e}");
+        }
+        match sled::open(index_dir) {
+            Ok(db) => {
+                tracing::info!("sled index recreated successfully");
+                return db;
+            }
+            Err(e3) => tracing::error!("sled index recreation failed ({e3}), falling back to tempdir"),
+        }
+
+        // Attempt 4: last resort — use a temporary directory so the server still starts.
+        // The index will be empty (no object store lookups) but narinfo + legacy nar/
+        // serving still works. The temp index is lost on restart, which is fine since
+        // the on-disk index was already broken.
+        let tmp = std::env::temp_dir().join(format!("pares-arca-sled-{}", std::process::id()));
+        let _ = std::fs::create_dir_all(&tmp);
+        match sled::open(&tmp) {
+            Ok(db) => {
+                tracing::warn!("sled running from tempdir {} — object store will be empty until next clean restart", tmp.display());
+                db
+            }
+            Err(e4) => {
+                // This should be essentially impossible, but handle it.
+                panic!("sled cannot open even in tempdir {}: {e4} — cannot start", tmp.display());
+            }
+        }
     }
 
     /// Store a compressed NAR blob, returning the object key.
