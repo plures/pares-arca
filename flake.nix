@@ -76,19 +76,16 @@
             fi
 
             set -f
-            for path in $OUT_PATHS; do
-              PARES_ARCA_DIR=${lib.escapeShellArg (toString cfg.cacheDir)} ${self.packages.${pkgs.system}.default}/bin/pares-arca import "$path" >/dev/null 2>&1 || true
-            done
-
-            # Sign imported paths if a signing key is available
+            # Import paths into cache — sign during import so narinfos are served with signatures
             ${lib.optionalString (effectiveSecretKeyPath != null) ''
-            SECRET_KEY="${effectiveSecretKeyPath}"
-            if [ -f "$SECRET_KEY" ]; then
-              for path in $OUT_PATHS; do
-                ${pkgs.nix}/bin/nix store sign --key-file "$SECRET_KEY" "$path" 2>/dev/null || true
-              done
-            fi
+            SIGN_ARG="--signing-key ${effectiveSecretKeyPath}"
             ''}
+            ${lib.optionalString (effectiveSecretKeyPath == null) ''
+            SIGN_ARG=""
+            ''}
+            for path in $OUT_PATHS; do
+              PARES_ARCA_DIR=${lib.escapeShellArg (toString cfg.cacheDir)} ${self.packages.${pkgs.system}.default}/bin/pares-arca import $SIGN_ARG "$path" >/dev/null 2>&1 || true
+            done
           '';
         in
         {
