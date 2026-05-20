@@ -177,6 +177,9 @@
               wantedBy = [ "multi-user.target" ];
 
               serviceConfig = {
+                ExecStartPre = lib.optionals (effectiveSecretKeyPath != null) [
+                  "${self.packages.${pkgs.system}.default}/bin/pares-arca sign --key-file ${effectiveSecretKeyPath}"
+                ];
                 ExecStart = "${self.packages.${pkgs.system}.default}/bin/pares-arca serve --bind ${cfg.bind}:${toString cfg.port}";
                 DynamicUser = true;
                 CacheDirectory = "pares-arca";
