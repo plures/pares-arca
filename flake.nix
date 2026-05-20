@@ -178,7 +178,7 @@
 
               serviceConfig = {
                 ExecStartPre = lib.optionals (effectiveSecretKeyPath != null) [
-                  "${self.packages.${pkgs.system}.default}/bin/pares-arca sign --key-file ${effectiveSecretKeyPath}"
+                  "${self.packages.${pkgs.system}.default}/bin/pares-arca sign --key-file \${CREDENTIALS_DIRECTORY}/signing-key"
                 ];
                 ExecStart = "${self.packages.${pkgs.system}.default}/bin/pares-arca serve --bind ${cfg.bind}:${toString cfg.port}";
                 DynamicUser = true;
@@ -187,6 +187,8 @@
                 Environment = "PARES_ARCA_DIR=${cfg.cacheDir}";
                 Restart = "on-failure";
                 RestartSec = "5s";
+              } // lib.optionalAttrs (effectiveSecretKeyPath != null) {
+                LoadCredential = "signing-key:${effectiveSecretKeyPath}";
               };
             };
 
