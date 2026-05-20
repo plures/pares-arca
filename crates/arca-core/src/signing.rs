@@ -89,13 +89,26 @@ impl CacheSigningKey {
     }
 
     /// Build the narinfo fingerprint string.
+    ///
+    /// Nix expects full store paths in the fingerprint, even though narinfo
+    /// files store references as basenames only.
     pub fn fingerprint(store_path: &str, nar_hash: &str, nar_size: u64, refs: &[String]) -> String {
+        let full_refs: Vec<String> = refs
+            .iter()
+            .map(|r| {
+                if r.starts_with("/nix/store/") {
+                    r.clone()
+                } else {
+                    format!("/nix/store/{}", r)
+                }
+            })
+            .collect();
         format!(
             "1;{};{};{};{}",
             store_path,
             nar_hash,
             nar_size,
-            refs.join(",")
+            full_refs.join(",")
         )
     }
 
