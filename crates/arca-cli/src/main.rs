@@ -146,6 +146,16 @@ enum Commands {
         #[arg(long)]
         max_size: Option<String>,
     },
+
+    /// Sign all unsigned narinfos in the cache
+    ///
+    /// Scans all .narinfo files and adds a signature to any that are missing one.
+    /// Existing signatures are preserved.
+    Sign {
+        /// Path to ed25519 signing key file
+        #[arg(long)]
+        key_file: PathBuf,
+    },
 }
 
 fn default_cache_dir() -> PathBuf {
@@ -546,6 +556,67 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 total_removed,
                 arca_core::gc::human_bytes(total_freed)
             );
+        }
+
+        Commands::Sign { key_file } => {
+            let sk = arca_core::CacheSigningKey::from_file(&key_file)
+                .map_err(|e| format!("Failed to load signing key: {e}"))?;
+            println!("🔑 Signing unsigned narinfos with key: {}", sk.name());
+
+            let mut signed = 0usize;
+            let mut already_signed = 0usize;
+            let mut errors = 0usize;
+
+            let entries: Vec<_> = std::fs::read_dir(&cache_dir)
+                .map_err(|e| format!("Cannot read cache dir: {e}"))?
+                .filter_map(|e| e.ok())
+                .filter(|e| e.path().extension().is_some_and(|ext| ext == "narinfo"))
+                .collect();
+
+            let total = entries.len();
+            println!("   Found {} narinfo files", total);
+
+            for entry in entries {
+                let path = entry.path();
+                let content = match std::fs::read_to_string(&path) {
+                    Ok(c) => c,
+                    Err(_) => { errors += 1; continue; }
+                };
+
+                // Skip if already has a signature
+                if content.lines().any(|l| l.starts_with("Sig:")) {
+                    already_signed += 1;
+                    continue;
+                }
+
+                // Parse narinfo to get fields for signing
+                let info = match arca_core::parse_narinfo(&content) {
+                    Ok(info) => info,
+                    Err(_) => { errors += 1; continue; }
+                };
+
+                let sig = sk.sign_narinfo(
+                    &info.store_path,
+                    &info.nar_hash,
+                    info.nar_size,
+                    &info.references,
+                );
+
+                // Append signature and rewrite
+                let mut new_content = content.clone();
+                if !new_content.ends_with('\n') {
+                    new_content.push('\n');
+                }
+                new_content.push_str(&format!("Sig: {}\n", sig));
+
+                if std::fs::write(&path, &new_content).is_err() {
+                    errors += 1;
+                    continue;
+                }
+                signed += 1;
+            }
+
+            println!("✅ Signed: {signed}, already signed: {already_signed}, errors: {errors}, total: {total}");
         }
     }
 
