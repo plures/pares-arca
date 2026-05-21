@@ -166,6 +166,7 @@
                   "${hostname}-pares-arca-1" "$SECRET" "$PUBLIC"
                 chmod 600 "$SECRET"
                 chmod 644 "$PUBLIC"
+                chmod 755 "$KEY_DIR"  # Directory must be traversable by all users
                 echo "[pares-arca] Signing key generated. Public key:"
                 cat "$PUBLIC"
               fi
@@ -222,6 +223,12 @@
               if [ -f "$PUBLIC" ]; then
                 PUB_KEY=$(cat "$PUBLIC")
                 echo "trusted-public-keys = $PUB_KEY cache.nixos.org-1:6NCHdD59X431o0gWypbMrAURkbJ16ZPMQFGspcDShjY=" > "$CONF"
+                # Public keys + trust config must be world-readable.
+                # The nix client runs as the calling user and parses !include directives.
+                # Secret key stays 600. Directory must be traversable (755).
+                chmod 755 "$KEY_DIR"
+                chmod 644 "$PUBLIC"
+                chmod 644 "$CONF"
                 echo "[pares-arca] Nix trusts local cache key: $PUB_KEY"
               fi
             '');
