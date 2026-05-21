@@ -134,6 +134,12 @@
               description = "Automatically generate a signing key pair on first start if none exists. Sets secretKeyFile and trusted-public-keys automatically.";
             };
 
+            logLevel = lib.mkOption {
+              type = lib.types.enum [ "error" "warn" "info" "debug" "trace" ];
+              default = "info";
+              description = "Log level for the pares-arca server. Set to 'debug' for troubleshooting.";
+            };
+
             signingKeyDir = lib.mkOption {
               type = lib.types.path;
               default = "/var/lib/pares-arca/signing";
@@ -187,7 +193,10 @@
                 DynamicUser = true;
                 CacheDirectory = "pares-arca";
                 StateDirectory = "pares-arca";
-                Environment = "PARES_ARCA_DIR=${cfg.cacheDir}";
+                Environment = [
+                  "PARES_ARCA_DIR=${cfg.cacheDir}"
+                  "RUST_LOG=arca_server=${cfg.logLevel},arca_core=${cfg.logLevel},pares_arca=${cfg.logLevel}"
+                ];
                 Restart = "on-failure";
                 RestartSec = "5s";
               };

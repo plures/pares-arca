@@ -8,6 +8,7 @@
 
 use std::path::PathBuf;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
 
 use axum::{
     body::Body,
@@ -18,7 +19,7 @@ use axum::{
     Router,
 };
 use tokio::net::TcpListener;
-use tracing::info;
+use tracing::{info, debug};
 
 use arca_core::backend::CacheBackend;
 use arca_core::NarObjectStore;
@@ -27,8 +28,12 @@ use arca_core::NarObjectStore;
 struct AppState {
     backend: Box<dyn CacheBackend>,
     nar_store: NarObjectStore,
-    /// Directory for nix-cache-info file.
     cache_dir: PathBuf,
+    // Request counters for periodic stats
+    narinfo_hits: AtomicU64,
+    narinfo_misses: AtomicU64,
+    nar_served: AtomicU64,
+    nar_bytes_served: AtomicU64,
 }
 
 /// Start the Arca HTTP server on the given address.
@@ -42,15 +47,20 @@ pub async fn serve(
     bind: &str,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let nar_store = nar_store.unwrap_or_else(|| NarObjectStore::new(&cache_dir));
-    let nar_dir = cache_dir.join("nar");
     let state = Arc::new(AppState {
         backend,
         nar_store,
         cache_dir: cache_dir.clone(),
+        narinfo_hits: AtomicU64::new(0),
+        narinfo_misses: AtomicU64::new(0),
+        nar_served: AtomicU64::new(0),
+        nar_bytes_served: AtomicU64::new(0),
     });
 
-    // Keep legacy nar_dir for fallback
-    let _legacy_nar_dir = nar_dir;
+    // Clone state for stats task BEFORE Router takes ownership
+    let stats_state = Arc::clone(&state);
+    let startup_count = state.backend.count();
+
     let app = Router::new()
         .route("/nix-cache-info", get(nix_cache_info))
         .route("/{hash_narinfo}", get(narinfo))
@@ -60,7 +70,31 @@ pub async fn serve(
 
     info!("Arca cache server listening on {bind}");
     info!("Cache directory: {}", cache_dir.display());
-    info!("Add to nix.conf: substituters = http://{bind} ; trusted-substituters = http://{bind}",);
+    info!(cached_paths = startup_count, "Ready to serve");
+
+    // Periodic stats heartbeat — logs summary every hour so the journal shows life
+    tokio::spawn(async move {
+        let mut interval = tokio::time::interval(std::time::Duration::from_secs(3600));
+        interval.tick().await; // skip immediate first tick
+        loop {
+            interval.tick().await;
+            let hits = stats_state.narinfo_hits.swap(0, Ordering::Relaxed);
+            let misses = stats_state.narinfo_misses.swap(0, Ordering::Relaxed);
+            let nars = stats_state.nar_served.swap(0, Ordering::Relaxed);
+            let bytes = stats_state.nar_bytes_served.swap(0, Ordering::Relaxed);
+            if hits + misses + nars > 0 {
+                info!(
+                    narinfo_hits = hits,
+                    narinfo_misses = misses,
+                    nars_served = nars,
+                    bytes_served = bytes,
+                    "hourly stats"
+                );
+            } else {
+                info!(cached_paths = stats_state.backend.count(), "heartbeat: idle, no requests in last hour");
+            }
+        }
+    });
 
     let listener = TcpListener::bind(bind).await?;
     axum::serve(listener, app).await?;
@@ -69,6 +103,7 @@ pub async fn serve(
 
 /// `GET /nix-cache-info`
 async fn nix_cache_info(State(state): State<Arc<AppState>>) -> impl IntoResponse {
+    debug!("nix-cache-info requested");
     match tokio::fs::read_to_string(state.cache_dir.join("nix-cache-info")).await {
         Ok(content) => (StatusCode::OK, content),
         Err(_) => (
@@ -84,6 +119,7 @@ async fn narinfo(
     Path(hash_with_ext): Path<String>,
 ) -> impl IntoResponse {
     let Some(hash) = hash_with_ext.strip_suffix(".narinfo") else {
+        debug!(path = %hash_with_ext, "narinfo: invalid path (no .narinfo suffix)");
         return (
             StatusCode::NOT_FOUND,
             [("content-type", "text/plain")],
@@ -92,16 +128,24 @@ async fn narinfo(
     };
 
     match state.backend.get_narinfo(hash) {
-        Ok(content) => (
-            StatusCode::OK,
-            [("content-type", "text/x-nix-narinfo")],
-            content,
-        ),
-        Err(_) => (
-            StatusCode::NOT_FOUND,
-            [("content-type", "text/plain")],
-            String::new(),
-        ),
+        Ok(content) => {
+            state.narinfo_hits.fetch_add(1, Ordering::Relaxed);
+            debug!(hash = %hash, "narinfo: hit");
+            (
+                StatusCode::OK,
+                [("content-type", "text/x-nix-narinfo")],
+                content,
+            )
+        }
+        Err(_) => {
+            state.narinfo_misses.fetch_add(1, Ordering::Relaxed);
+            debug!(hash = %hash, "narinfo: miss");
+            (
+                StatusCode::NOT_FOUND,
+                [("content-type", "text/plain")],
+                String::new(),
+            )
+        }
     }
 }
 
@@ -118,6 +162,9 @@ async fn nar_file(
 
     // Try plures-object store first
     if let Ok(data) = state.nar_store.get_nar(&file).await {
+        state.nar_served.fetch_add(1, Ordering::Relaxed);
+        state.nar_bytes_served.fetch_add(data.len() as u64, Ordering::Relaxed);
+        info!(file = %file, bytes = data.len(), "nar: served from object store");
         return (
             StatusCode::OK,
             [("content-type", content_type)],
@@ -129,12 +176,17 @@ async fn nar_file(
     // Fallback to legacy filesystem for pre-migration NARs
     let nar_path = state.cache_dir.join("nar").join(&file);
     match tokio::fs::File::open(&nar_path).await {
-        Ok(file) => {
-            let stream = tokio_util::io::ReaderStream::new(file);
+        Ok(file_handle) => {
+            state.nar_served.fetch_add(1, Ordering::Relaxed);
+            info!(file = %file, "nar: served from legacy filesystem");
+            let stream = tokio_util::io::ReaderStream::new(file_handle);
             let body = Body::from_stream(stream);
             (StatusCode::OK, [("content-type", content_type)], body).into_response()
         }
-        Err(_) => (StatusCode::NOT_FOUND, "Not found").into_response(),
+        Err(_) => {
+            debug!(file = %file, "nar: not found");
+            (StatusCode::NOT_FOUND, "Not found").into_response()
+        }
     }
 }
 

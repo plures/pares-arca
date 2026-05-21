@@ -182,7 +182,7 @@ fi
 
 while IFS= read -r path; do
     [ -z "$path" ] && continue
-    PARES_ARCA_DIR={cache} {cli} import "$path" >/dev/null 2>&1 || true
+    PARES_ARCA_DIR={cache} {cli} import "$path" 2>&1 | systemd-cat -t pares-arca -p info || true
 done <<< "$OUT_PATHS"
 "#,
         cache = cache,
