@@ -214,7 +214,6 @@
             };
 
             # post-build-hook is a top-level nix option, not under settings
-            # Merge with trust-key include into a single extraOptions block
             nix.extraOptions = lib.mkMerge [
               (lib.mkIf cfg.postBuildHook ''
                 post-build-hook = ${postBuildHookScript}
@@ -225,13 +224,14 @@
             ];
 
             # Generate a nix config snippet alongside the key pair
+            # Uses extra-trusted-public-keys (APPENDS) not trusted-public-keys (REPLACES)
             system.activationScripts.pares-arca-trust-key = lib.mkIf (cfg.autoSigningKey && cfg.secretKeyFile == null) (lib.stringAfter [ "pares-arca-signing-key" ] ''
               KEY_DIR="${cfg.signingKeyDir}"
               PUBLIC="$KEY_DIR/public-key.pem"
               CONF="$KEY_DIR/nix-trusted-key.conf"
               if [ -f "$PUBLIC" ]; then
                 PUB_KEY=$(cat "$PUBLIC")
-                echo "trusted-public-keys = $PUB_KEY cache.nixos.org-1:6NCHdD59X431o0gWypbMrAURkbJ16ZPMQFGspcDShjY=" > "$CONF"
+                echo "extra-trusted-public-keys = $PUB_KEY" > "$CONF"
                 # Public keys + trust config must be world-readable.
                 # The nix client runs as the calling user and parses !include directives.
                 # Secret key stays 600. Directory must be traversable (755).
