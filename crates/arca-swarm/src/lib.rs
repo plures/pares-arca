@@ -75,7 +75,7 @@ use tokio::sync::{broadcast, Mutex};
 use tracing::{debug, info, warn};
 
 use crdt::{CrdtEntry, NarInfoCrdt};
-use discovery::{DiscoverySocket, ANNOUNCE_INTERVAL, DISCOVERY_TIMEOUT};
+use discovery::{DiscoverySocket, ANNOUNCE_INTERVAL, DISCOVERY_TIMEOUT, RESYNC_INTERVAL};
 use error::SwarmError;
 use protocol::{DiscoveryMsg, HaveEntry, SyncMsg};
 use topic::{derive_topic_hash, topic_hash_hex};
@@ -414,13 +414,44 @@ impl SwarmNode {
             }
         }
 
-        // ---- Periodic re-announce loop ----
+        // ---- Periodic re-announce + re-sync loop ----
         let mut announce_interval = tokio::time::interval(ANNOUNCE_INTERVAL);
         announce_interval.tick().await; // skip the first immediate tick
+        let mut resync_interval = tokio::time::interval(RESYNC_INTERVAL);
+        resync_interval.tick().await; // skip the first immediate tick
 
         loop {
             tokio::select! {
                 _ = shutdown.recv() => return Ok(()),
+                _ = resync_interval.tick() => {
+                    // Clear the synced set so all known peers re-sync their
+                    // HaveLists on the next announce cycle. This ensures new
+                    // paths built since last sync are propagated.
+                    let cleared = {
+                        let mut guard = synced.lock().await;
+                        let n = guard.len();
+                        guard.clear();
+                        n
+                    };
+                    if cleared > 0 {
+                        debug!(cleared, "Cleared synced set for periodic re-sync");
+                    }
+                    // Re-announce immediately to trigger new connections.
+                    if let Err(e) = sock.multicast(&announce).await {
+                        warn!("Re-sync announce failed: {e}");
+                    }
+                    // Also re-contact static peers directly.
+                    for &addr in &self.config.static_peers {
+                        let _ = sock.send_to(
+                            &DiscoveryMsg::AnnounceReply {
+                                noise_pubkey: self.keypair.public_hex.clone(),
+                                sync_port: self.config.sync_port,
+                                http_port: self.config.http_port,
+                            },
+                            addr,
+                        ).await;
+                    }
+                }
                 _ = announce_interval.tick() => {
                     if let Err(e) = sock.multicast(&announce).await {
                         warn!("Periodic announce failed: {e}");

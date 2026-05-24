@@ -36,6 +36,10 @@ pub const DISCOVERY_TIMEOUT: Duration = Duration::from_secs(5);
 /// Interval between periodic re-announcements.
 pub const ANNOUNCE_INTERVAL: Duration = Duration::from_secs(30);
 
+/// Interval between full re-sync cycles with known peers.
+/// Clears the "already synced" set so peers exchange updated HaveLists.
+pub const RESYNC_INTERVAL: Duration = Duration::from_secs(60);
+
 // ---------------------------------------------------------------------------
 // DiscoverySocket
 // ---------------------------------------------------------------------------
