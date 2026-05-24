@@ -48,6 +48,11 @@ enum Commands {
         /// Address to bind (default: 127.0.0.1:5555)
         #[arg(long, default_value = "127.0.0.1:5555")]
         bind: String,
+
+        /// PluresDB sync topic for P2P replication. When set, narinfo metadata
+        /// replicates to all peers on the same topic via Hyperswarm.
+        #[arg(long, env = "PARES_ARCA_SYNC_TOPIC")]
+        sync_topic: Option<String>,
     },
 
     /// Import a single Nix store path
@@ -190,7 +195,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     };
 
     match cli.command {
-        Commands::Serve { bind } => {
+        Commands::Serve { bind, sync_topic } => {
             let config = arca_core::CacheConfig::load_or_create(&config_path)?;
             println!("📦 Loaded {} segment(s) from config", config.segments.len());
             for seg in &config.segments {
@@ -202,6 +207,24 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 }
                 _ => Box::new(arca_core::FsNarinfoStore::new(&cache_dir)),
             };
+
+            // Start PluresDB Hyperswarm sync if topic is configured
+            let _sync_handle = if let Some(ref topic) = sync_topic {
+                let nar_store = arca_core::NarObjectStore::new(&cache_dir);
+                match arca_core::sync::start_sync(nar_store.crdt_store().clone(), topic) {
+                    Ok(handle) => {
+                        println!("🌐 P2P sync active — topic: {topic}");
+                        Some(handle)
+                    }
+                    Err(e) => {
+                        eprintln!("⚠️  Failed to start sync: {e}");
+                        None
+                    }
+                }
+            } else {
+                None
+            };
+
             arca_server::serve(server_backend, cache_dir, None, &bind).await?;
         }
 

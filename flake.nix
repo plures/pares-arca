@@ -199,7 +199,7 @@
                     exec ${self.packages.${pkgs.system}.default}/bin/pares-arca sign --key-file ${effectiveSecretKeyPath}
                   ''}"
                 ];
-                ExecStart = "${self.packages.${pkgs.system}.default}/bin/pares-arca serve --bind ${cfg.bind}:${toString cfg.port}";
+                ExecStart = "${self.packages.${pkgs.system}.default}/bin/pares-arca serve --bind ${cfg.bind}:${toString cfg.port}${lib.optionalString cfg.sync.enable " --sync-topic ${cfg.sync.topic}"}";
                 DynamicUser = true;
                 CacheDirectory = "pares-arca";
                 StateDirectory = "pares-arca";
