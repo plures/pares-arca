@@ -145,6 +145,41 @@
               default = "/var/lib/pares-arca/signing";
               description = "Directory to store the auto-generated signing key pair.";
             };
+
+            swarm = {
+              enable = lib.mkEnableOption "P2P swarm replication";
+
+              topic = lib.mkOption {
+                type = lib.types.str;
+                default = "pares-arca-public";
+                description = "Swarm topic name. Nodes with the same topic sync together. The topic string is never sent on the wire (only its SHA-256 hash).";
+              };
+
+              discoveryPort = lib.mkOption {
+                type = lib.types.port;
+                default = 7070;
+                description = "UDP port for multicast peer discovery.";
+              };
+
+              syncPort = lib.mkOption {
+                type = lib.types.port;
+                default = 7071;
+                description = "TCP port for Noise-encrypted sync connections.";
+              };
+
+              staticPeers = lib.mkOption {
+                type = lib.types.listOf lib.types.str;
+                default = [];
+                description = "Static peer addresses (host:port) to connect to unconditionally. Useful when multicast doesn't traverse network boundaries.";
+                example = [ "192.168.1.10:7071" "peer.example.com:7071" ];
+              };
+
+              openFirewall = lib.mkOption {
+                type = lib.types.bool;
+                default = true;
+                description = "Open firewall ports for swarm discovery (UDP) and sync (TCP).";
+              };
+            };
           };
 
           config = lib.mkIf cfg.enable (
@@ -202,8 +237,40 @@
               };
             };
 
+            # ── Swarm service (P2P replication) ────────────────────────────
+            systemd.services.pares-arca-swarm = lib.mkIf cfg.swarm.enable {
+              description = "Pares Arca Swarm — P2P cache replication";
+              wantedBy = [ "multi-user.target" ];
+              after = [ "pares-arca.service" "network-online.target" ];
+              wants = [ "network-online.target" ];
+
+              serviceConfig = {
+                ExecStart = let
+                  staticPeerArgs = lib.concatMapStrings (p: " --static-peer ${p}") cfg.swarm.staticPeers;
+                in "${self.packages.${pkgs.system}.default}/bin/pares-arca swarm --topic ${cfg.swarm.topic} --discovery-port ${toString cfg.swarm.discoveryPort} --sync-port ${toString cfg.swarm.syncPort}${staticPeerArgs}";
+                DynamicUser = true;
+                CacheDirectory = "pares-arca";
+                StateDirectory = "pares-arca";
+                Environment = [
+                  "PARES_ARCA_DIR=${cfg.cacheDir}"
+                  "RUST_LOG=arca_swarm=info,arca_core=info"
+                ];
+                Restart = "on-failure";
+                RestartSec = 10;
+                # Hardening
+                ProtectSystem = "strict";
+                ProtectHome = true;
+                NoNewPrivileges = true;
+                PrivateTmp = true;
+              };
+            };
+
             networking.firewall.allowedTCPPorts =
-              lib.optional cfg.openFirewall cfg.port;
+              lib.optional cfg.openFirewall cfg.port
+              ++ lib.optional (cfg.swarm.enable && cfg.swarm.openFirewall) cfg.swarm.syncPort;
+
+            networking.firewall.allowedUDPPorts =
+              lib.optional (cfg.swarm.enable && cfg.swarm.openFirewall) cfg.swarm.discoveryPort;
 
             # Auto-configure Nix to use local cache
             # Always use localhost for the client URL — bind address (e.g. 0.0.0.0)
