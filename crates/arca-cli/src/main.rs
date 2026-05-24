@@ -6,7 +6,6 @@
 //! - `import-closure <flake-ref>` — Import an entire flake closure
 //! - `status` — Show cache status
 //! - `list` — List cached paths
-//! - `swarm` — Start P2P replication via Hyperswarm-style discovery
 //! - `install-hook` — Install Nix post-build hook for automatic imports
 
 use clap::{Parser, Subcommand};
@@ -81,44 +80,6 @@ enum Commands {
     /// List all cached paths
     List,
 
-    /// Start Hyperswarm P2P cache replication
-    ///
-    /// Discovers peers that share the same `--topic` key using UDP multicast,
-    /// exchanges narinfo metadata via Noise-encrypted TCP connections, and
-    /// syncs the CRDT state to disk.  Falls back gracefully if no peers are
-    /// reachable.
-    Swarm {
-        /// Shared topic key — all nodes with the same topic will sync together.
-        ///
-        /// Only the SHA-256 hash of this string is sent on the wire, so the
-        /// raw topic remains private.
-        #[arg(long, default_value = "pares-arca-default")]
-        topic: String,
-
-        /// UDP port for peer discovery announcements.
-        #[arg(long, default_value_t = 7070)]
-        discovery_port: u16,
-
-        /// TCP port for Noise-encrypted sync connections.
-        #[arg(long, default_value_t = 7071)]
-        sync_port: u16,
-
-        /// HTTP server port announced to peers for NAR fetching.
-        #[arg(long, default_value_t = 5555)]
-        http_port: u16,
-
-        /// Also start the HTTP substituter server alongside the swarm.
-        #[arg(long)]
-        also_serve: bool,
-
-        /// Static peer addresses to always try connecting to
-        /// (e.g. bootstrap nodes or peers not reachable by multicast).
-        ///
-        /// Can be specified multiple times: `--static-peer 10.0.0.1:7070`
-        #[arg(long = "static-peer")]
-        static_peers: Vec<String>,
-    },
-
     /// Install the Nix post-build hook at /etc/nix/post-build-hook
     InstallHook,
 
@@ -148,9 +109,6 @@ enum Commands {
     },
 
     /// Sign all unsigned narinfos in the cache
-    ///
-    /// Scans all .narinfo files and adds a signature to any that are missing one.
-    /// Existing signatures are preserved.
     Sign {
         /// Path to ed25519 signing key file
         #[arg(long)]
@@ -214,18 +172,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let db_path = cli.db_path.unwrap_or_else(|| cache_dir.join("db"));
 
     // Build the selected backend for metadata operations.
-    // For the `serve` command with filesystem backend, use the lightweight
-    // FsNarinfoStore so that serve() can open its own NarObjectStore without
-    // a sled lock conflict.
     let is_serve = matches!(cli.command, Commands::Serve { .. });
     let backend: Arc<dyn CacheBackend> = match cli.backend.as_str() {
         "sled" => {
-            // Remove stale lock file if it exists (common after crashes)
-            let lock_path = db_path.join("lock");
-            if lock_path.exists() {
-                eprintln!("⚠️  Removing stale sled lock: {}", lock_path.display());
-                let _ = std::fs::remove_file(&lock_path);
-            }
             let store = arca_core::SledStore::new(&db_path)
                 .map_err(|e| format!("failed to open sled db: {e}"))?;
             Arc::new(store)
@@ -247,9 +196,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             for seg in &config.segments {
                 println!("   • {} ({:?})", seg.name, seg.filter);
             }
-            // Use FsNarinfoStore for the backend — it only does narinfo file ops.
-            // serve() creates its own NarObjectStore, so using CacheStore here would
-            // create a duplicate sled instance causing a WouldBlock lock error.
             let server_backend: Box<dyn CacheBackend> = match cli.backend.as_str() {
                 "sled" => {
                     Box::new(ArcBackendWrapper(Arc::clone(&backend)))
@@ -279,7 +225,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             println!("   Segment: {}", seg.name);
             let store = arca_core::CacheStore::new(&cache_dir)?;
 
-            // Resolve signing key: CLI flag > config file
             let key_path =
                 signing_key.or_else(|| config.signing_key_path.as_ref().map(PathBuf::from));
             let info = if let Some(ref kp) = key_path {
@@ -316,7 +261,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             println!("   Cached paths: {count}");
             println!("   Narinfo size: {:.1} KB", size as f64 / 1024.0);
 
-            // Show plures-object dedup stats
             let nar_store = arca_core::NarObjectStore::new(&cache_dir);
             if let Ok(stats) = nar_store.dedup_stats().await {
                 if stats.nar_count > 0 {
@@ -341,7 +285,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 println!("Cache is empty. Run `pares-arca import-closure .` to populate.");
             } else {
                 for hash in &hashes {
-                    // Try to extract StorePath from narinfo content
                     if let Ok(content) = backend.get_narinfo(hash) {
                         if let Some(line) = content.lines().find(|l| l.starts_with("StorePath:")) {
                             if let Some(path) = line.strip_prefix("StorePath:") {
@@ -354,111 +297,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 }
                 println!("\n{} paths cached", hashes.len());
             }
-        }
-
-        Commands::Swarm {
-            topic,
-            discovery_port,
-            sync_port,
-            http_port,
-            also_serve,
-            static_peers,
-        } => {
-            let config = arca_core::CacheConfig::load_or_create(&config_path)?;
-            println!("📦 Loaded {} segment(s) from config", config.segments.len());
-            for seg in &config.segments {
-                println!("   • {} (topic: {}...)", seg.name, &seg.topic_key[..8]);
-            }
-            // Parse static peer addresses.
-            let mut parsed_peers = Vec::new();
-            for raw in &static_peers {
-                match raw.parse() {
-                    Ok(addr) => parsed_peers.push(addr),
-                    Err(e) => {
-                        eprintln!("Invalid --static-peer address '{raw}': {e}");
-                        std::process::exit(1);
-                    }
-                }
-            }
-
-            let config = arca_swarm::SwarmConfig {
-                topic: topic.clone(),
-                discovery_port,
-                sync_port,
-                http_port,
-                static_peers: parsed_peers,
-                ephemeral_keys: false,
-            };
-
-            println!("🌐 Pares Arca Swarm");
-            println!("   Cache directory : {}", cache_dir.display());
-            println!("   Topic           : {topic}");
-            println!("   Discovery port  : UDP {discovery_port}");
-            println!("   Sync port       : TCP {sync_port}");
-            println!("   HTTP port       : {http_port}");
-            println!();
-            println!("   Discovering peers… (Ctrl-C to stop)");
-
-            // Set up a broadcast channel so we can shut everything down on
-            // Ctrl-C.
-            let (shutdown_tx, shutdown_rx) = tokio::sync::broadcast::channel::<()>(1);
-
-            // Set up an event channel to print swarm events.
-            let (event_tx, mut event_rx) =
-                tokio::sync::mpsc::unbounded_channel::<arca_swarm::SwarmEvent>();
-
-            // Spawn the event printer.
-            tokio::spawn(async move {
-                while let Some(event) = event_rx.recv().await {
-                    match event {
-                        arca_swarm::SwarmEvent::PeerSynced {
-                            peer_addr,
-                            new_paths,
-                        } => {
-                            println!("   ✅ Synced with {peer_addr} — {new_paths} new path(s)");
-                        }
-                        arca_swarm::SwarmEvent::PeerSyncFailed { peer_addr, reason } => {
-                            println!("   ⚠️  Sync with {peer_addr} failed: {reason}");
-                        }
-                        arca_swarm::SwarmEvent::NoPeers => {
-                            println!("   ℹ️  No peers found — running in local-only mode");
-                            println!("      (will keep announcing; peers can join at any time)");
-                        }
-                    }
-                }
-            });
-
-            // Optionally start the HTTP server in the background.
-            if also_serve {
-                let bind = format!("0.0.0.0:{http_port}");
-                let serve_dir = cache_dir.clone();
-                let mut serve_shutdown = shutdown_tx.subscribe();
-                tokio::spawn(async move {
-                    let serve_backend: Box<dyn CacheBackend> = Box::new(
-                        arca_core::FsNarinfoStore::new(&serve_dir),
-                    );
-                    tokio::select! {
-                        res = arca_server::serve(serve_backend, serve_dir, None, &bind) => {
-                            if let Err(e) = res { tracing::error!("HTTP server error: {e}"); }
-                        }
-                        _ = serve_shutdown.recv() => {}
-                    }
-                });
-                println!("   HTTP server     : http://0.0.0.0:{http_port}");
-            }
-
-            // Ctrl-C handler.
-            let ctrlc_tx = shutdown_tx.clone();
-            tokio::spawn(async move {
-                if tokio::signal::ctrl_c().await.is_ok() {
-                    println!("\n   Shutting down swarm…");
-                    let _ = ctrlc_tx.send(());
-                }
-            });
-
-            // Start the swarm node.
-            let node = arca_swarm::SwarmNode::new(cache_dir, config).await?;
-            node.run(shutdown_rx, Some(event_tx)).await?;
         }
 
         Commands::InstallHook => {
@@ -506,7 +344,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
             let nar_store = arca_core::NarObjectStore::new(&cache_dir);
 
-            // Try to open audit log
             let db_path_gc = db_path.clone();
             let audit_log = sled::open(&db_path_gc)
                 .ok()
@@ -583,13 +420,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     Err(_) => { errors += 1; continue; }
                 };
 
-                // Skip if already has a signature
                 if content.lines().any(|l| l.starts_with("Sig:")) {
                     already_signed += 1;
                     continue;
                 }
 
-                // Parse narinfo to get fields for signing
                 let info = match arca_core::parse_narinfo(&content) {
                     Ok(info) => info,
                     Err(_) => { errors += 1; continue; }
@@ -602,7 +437,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     &info.references,
                 );
 
-                // Append signature and rewrite
                 let mut new_content = content.clone();
                 if !new_content.ends_with('\n') {
                     new_content.push('\n');
@@ -680,13 +514,10 @@ mod tests {
         let key1 = generate();
         let key2 = generate();
 
-        // 64 hex chars = 32 bytes = 256 bits
         assert_eq!(key1.len(), 64);
         assert_eq!(key2.len(), 64);
         assert!(key1.chars().all(|c| c.is_ascii_hexdigit()));
         assert!(key2.chars().all(|c| c.is_ascii_hexdigit()));
-
-        // Keys must be unique
         assert_ne!(key1, key2);
     }
 }

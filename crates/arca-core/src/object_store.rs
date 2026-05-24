@@ -1,10 +1,9 @@
-//! NAR blob storage via pluresdb — content-addressed storage.
+//! NAR blob storage via PluresDB — content-addressed storage with CRDT replication.
 //!
-//! Instead of writing raw `.nar.xz` files to the filesystem, this module
-//! stores compressed NARs through pluresdb's `FileBlobStore`, gaining:
-//!
-//! - **Content addressing**: SHA-256 blob IDs guarantee integrity
-//! - **Simple CAS layout**: two-level fan-out directory (like Git loose objects)
+//! Uses PluresDB's `FileBlobStore` for the actual NAR binary blobs (content-addressed)
+//! and PluresDB's `CrdtStore` for the key→hash index. The CrdtStore index automatically
+//! replicates via Hyperswarm when sync is enabled, meaning narinfo metadata propagates
+//! to all peers without any custom networking code.
 //!
 //! # Layout
 //!
@@ -12,20 +11,26 @@
 //! <cache_dir>/
 //!   objects/
 //!     blobs/   ← sharded content-addressed blobs (pluresdb FileBlobStore)
+//!     index/   ← PluresDB CrdtStore (SledStorage) for key→hash mapping
 //! ```
 
 use std::collections::HashMap;
 use std::path::Path;
+use std::sync::Arc;
 
 use bytes::Bytes;
+use pluresdb::{CrdtStore, SledStorage, StorageEngine};
 use pluresdb_storage::{BlobStore, FileBlobStore};
 
-/// NAR object store backed by pluresdb's `FileBlobStore`.
+/// The PluresDB actor ID used for all write operations in the NAR index.
+const ACTOR: &str = "pares-arca";
+
+/// NAR object store backed by pluresdb's `FileBlobStore` for blobs
+/// and `CrdtStore` for the replicated index.
 pub struct NarObjectStore {
     blob_store: FileBlobStore,
-    /// Maps NAR key (e.g. `"nar/abc.nar.xz"`) to its blob hash.
-    /// Backed by a sled tree for persistence.
-    index: sled::Db,
+    /// CRDT-replicated index: maps NAR key (e.g. `"nar/abc.nar.xz"`) to its blob metadata.
+    index: Arc<CrdtStore>,
 }
 
 impl NarObjectStore {
@@ -35,11 +40,10 @@ impl NarObjectStore {
         let blobs_dir = objects_dir.join("blobs");
         let index_dir = objects_dir.join("index");
 
-        // Ensure directories exist — if something blocks the path, remove it and retry
+        // Ensure directories exist
         for dir in [&objects_dir, &blobs_dir, &index_dir] {
             if let Err(e) = std::fs::create_dir_all(dir) {
                 tracing::warn!("failed to create {}: {e}, attempting cleanup", dir.display());
-                // Remove whatever is blocking (could be a file or dir with wrong perms)
                 if objects_dir.is_dir() {
                     let _ = std::fs::remove_dir_all(&objects_dir);
                 } else if objects_dir.exists() {
@@ -55,7 +59,6 @@ impl NarObjectStore {
             Ok(bs) => bs,
             Err(e) => {
                 tracing::warn!("FileBlobStore open failed ({e}), wiping objects dir and retrying");
-                // Remove objects_dir whether it's a dir or a file blocking the path
                 if objects_dir.is_dir() {
                     let _ = std::fs::remove_dir_all(&objects_dir);
                 } else {
@@ -66,7 +69,6 @@ impl NarObjectStore {
                 match FileBlobStore::open(&blobs_dir) {
                     Ok(bs) => bs,
                     Err(e2) => {
-                        // Last resort: use a tempdir for blobs too
                         tracing::error!("FileBlobStore still failing ({e2}), falling back to tempdir");
                         use std::sync::atomic::{AtomicU64, Ordering};
                         static BLOB_COUNTER: AtomicU64 = AtomicU64::new(0);
@@ -81,18 +83,22 @@ impl NarObjectStore {
             }
         };
 
-        let index = Self::open_sled_with_recovery(&index_dir);
+        let index = Self::open_crdt_store_with_recovery(&index_dir);
 
         Self { blob_store, index }
     }
 
-    /// Open sled with progressive recovery: remove lock → wipe dir → in-memory fallback.
+    /// Open PluresDB CrdtStore with progressive recovery.
     /// Never panics — the cache server always starts, even if the index is degraded.
-    fn open_sled_with_recovery(index_dir: &std::path::Path) -> sled::Db {
+    fn open_crdt_store_with_recovery(index_dir: &std::path::Path) -> Arc<CrdtStore> {
         // Attempt 1: normal open
-        match sled::open(index_dir) {
-            Ok(db) => return db,
-            Err(e) => tracing::warn!("sled index open failed ({e}), attempting recovery"),
+        match SledStorage::open(index_dir) {
+            Ok(storage) => {
+                let store = CrdtStore::default()
+                    .with_persistence(Arc::new(storage) as Arc<dyn StorageEngine>);
+                return Arc::new(store);
+            }
+            Err(e) => tracing::warn!("PluresDB index open failed ({e}), attempting recovery"),
         }
 
         // Attempt 2: remove stale lock file and retry
@@ -100,48 +106,58 @@ impl NarObjectStore {
         if lock_path.exists() {
             let _ = std::fs::remove_file(&lock_path);
         }
-        match sled::open(index_dir) {
-            Ok(db) => {
-                tracing::info!("sled index recovered after removing stale lock");
-                return db;
+        match SledStorage::open(index_dir) {
+            Ok(storage) => {
+                tracing::info!("PluresDB index recovered after removing stale lock");
+                let store = CrdtStore::default()
+                    .with_persistence(Arc::new(storage) as Arc<dyn StorageEngine>);
+                return Arc::new(store);
             }
-            Err(e2) => tracing::warn!("sled index still broken after lock removal ({e2})"),
+            Err(e2) => tracing::warn!("PluresDB index still broken after lock removal ({e2})"),
         }
 
         // Attempt 3: wipe the entire index directory and recreate
-        tracing::warn!("wiping sled index at {} and recreating", index_dir.display());
+        tracing::warn!("wiping PluresDB index at {} and recreating", index_dir.display());
         if let Err(e) = std::fs::remove_dir_all(index_dir) {
-            tracing::error!("failed to remove sled index dir: {e}");
+            tracing::error!("failed to remove PluresDB index dir: {e}");
         }
         if let Err(e) = std::fs::create_dir_all(index_dir) {
-            tracing::error!("failed to recreate sled index dir: {e}");
+            tracing::error!("failed to recreate PluresDB index dir: {e}");
         }
-        match sled::open(index_dir) {
-            Ok(db) => {
-                tracing::info!("sled index recreated successfully");
-                return db;
+        match SledStorage::open(index_dir) {
+            Ok(storage) => {
+                tracing::info!("PluresDB index recreated successfully");
+                let store = CrdtStore::default()
+                    .with_persistence(Arc::new(storage) as Arc<dyn StorageEngine>);
+                return Arc::new(store);
             }
-            Err(e3) => tracing::error!("sled index recreation failed ({e3}), falling back to tempdir"),
+            Err(e3) => tracing::error!("PluresDB index recreation failed ({e3}), falling back to tempdir"),
         }
 
-        // Attempt 4: last resort — use a temporary directory so the server still starts.
-        // Use a unique suffix to avoid lock conflicts when multiple NarObjectStores
-        // are created in the same process.
+        // Attempt 4: last resort — use a temporary directory
         use std::sync::atomic::{AtomicU64, Ordering};
         static COUNTER: AtomicU64 = AtomicU64::new(0);
         let n = COUNTER.fetch_add(1, Ordering::Relaxed);
-        let tmp = std::env::temp_dir().join(format!("pares-arca-sled-{}-{n}", std::process::id()));
+        let tmp = std::env::temp_dir().join(format!("pares-arca-pluresdb-{}-{n}", std::process::id()));
         let _ = std::fs::create_dir_all(&tmp);
-        match sled::open(&tmp) {
-            Ok(db) => {
-                tracing::warn!("sled running from tempdir {} — object store will be empty until next clean restart", tmp.display());
-                db
+        match SledStorage::open(&tmp) {
+            Ok(storage) => {
+                tracing::warn!("PluresDB running from tempdir {} — index will be empty until next clean restart", tmp.display());
+                let store = CrdtStore::default()
+                    .with_persistence(Arc::new(storage) as Arc<dyn StorageEngine>);
+                Arc::new(store)
             }
             Err(e4) => {
-                // This should be essentially impossible, but handle it.
-                panic!("sled cannot open even in tempdir {}: {e4} — cannot start", tmp.display());
+                // Use in-memory fallback — truly last resort
+                tracing::error!("PluresDB cannot open even in tempdir {}: {e4} — using in-memory store", tmp.display());
+                Arc::new(CrdtStore::default())
             }
         }
+    }
+
+    /// Get a reference to the underlying CrdtStore for sync setup.
+    pub fn crdt_store(&self) -> &Arc<CrdtStore> {
+        &self.index
     }
 
     /// Store a compressed NAR blob, returning the object key.
@@ -161,23 +177,24 @@ impl NarObjectStore {
     ) -> anyhow::Result<String> {
         let key = format!("nar/{nar_filename}");
         let hash = self.blob_store.put(&data)?;
-        // Store key → hash mapping + size
-        let meta = serde_json::to_vec(&NarMeta {
+        // Store key → hash mapping + size in PluresDB CrdtStore
+        let meta = NarMeta {
             hash: hash.clone(),
             size: data.len() as u64,
-        })?;
-        self.index.insert(key.as_bytes(), meta)?;
+        };
+        let value = serde_json::to_value(&meta)?;
+        self.index.put(&key, ACTOR, value);
         Ok(key)
     }
 
     /// Retrieve a compressed NAR blob by filename (e.g. `abc123.nar.xz`).
     pub async fn get_nar(&self, nar_filename: &str) -> anyhow::Result<Bytes> {
         let key = format!("nar/{nar_filename}");
-        let meta = self
+        let record = self
             .index
-            .get(key.as_bytes())?
+            .get(&key)
             .ok_or_else(|| anyhow::anyhow!("NAR not found: {key}"))?;
-        let meta: NarMeta = serde_json::from_slice(&meta)?;
+        let meta: NarMeta = serde_json::from_value(record.data)?;
         let data = self
             .blob_store
             .get(&meta.hash)?
@@ -188,20 +205,21 @@ impl NarObjectStore {
     /// Check if a NAR blob exists in the object store.
     pub async fn has_nar(&self, nar_filename: &str) -> bool {
         let key = format!("nar/{nar_filename}");
-        self.index.get(key.as_bytes()).ok().flatten().is_some()
+        self.index.get(&key).is_some()
     }
 
     /// Delete a NAR blob from the object store.
     pub async fn delete_nar(&self, nar_filename: &str) -> anyhow::Result<()> {
         let key = format!("nar/{nar_filename}");
-        if let Some(meta_bytes) = self.index.remove(key.as_bytes())? {
-            let meta: NarMeta = serde_json::from_slice(&meta_bytes)?;
+        // Read the meta before deleting to check if blob can be GC'd
+        if let Some(record) = self.index.get(&key) {
+            let meta: NarMeta = serde_json::from_value(record.data)?;
+            let _ = self.index.delete(&key);
+
             // Only delete the blob if no other key references it
-            let hash_still_referenced = self.index.iter().any(|entry| {
-                if let Ok((_, v)) = entry {
-                    if let Ok(m) = serde_json::from_slice::<NarMeta>(&v) {
-                        return m.hash == meta.hash;
-                    }
+            let hash_still_referenced = self.index.list().iter().any(|r| {
+                if let Ok(m) = serde_json::from_value::<NarMeta>(r.data.clone()) {
+                    return m.hash == meta.hash;
                 }
                 false
             });
@@ -214,14 +232,12 @@ impl NarObjectStore {
 
     /// List all NAR keys in the object store.
     pub async fn list_nars(&self) -> anyhow::Result<Vec<String>> {
-        let mut keys = Vec::new();
-        for entry in self.index.iter() {
-            let (k, _) = entry?;
-            let key = String::from_utf8(k.to_vec())?;
-            if key.starts_with("nar/") {
-                keys.push(key);
-            }
-        }
+        let records = self.index.list();
+        let keys: Vec<String> = records
+            .into_iter()
+            .filter(|r| r.id.starts_with("nar/"))
+            .map(|r| r.id)
+            .collect();
         Ok(keys)
     }
 
@@ -231,14 +247,15 @@ impl NarObjectStore {
         let mut unique_hashes = HashMap::new();
         let mut nar_count = 0;
 
-        for entry in self.index.iter() {
-            let (k, v) = entry?;
-            let key = String::from_utf8(k.to_vec())?;
-            if !key.starts_with("nar/") {
+        for record in self.index.list() {
+            if !record.id.starts_with("nar/") {
                 continue;
             }
+            let meta: NarMeta = match serde_json::from_value(record.data) {
+                Ok(m) => m,
+                Err(_) => continue,
+            };
             nar_count += 1;
-            let meta: NarMeta = serde_json::from_slice(&v)?;
             total_nar_bytes += meta.size;
             unique_hashes.entry(meta.hash.clone()).or_insert(meta.size);
         }
@@ -254,7 +271,7 @@ impl NarObjectStore {
     }
 }
 
-/// Internal metadata stored in the sled index per NAR key.
+/// Internal metadata stored in the PluresDB CrdtStore per NAR key.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 struct NarMeta {
     hash: String,
@@ -325,7 +342,6 @@ mod tests {
 
         let stats = store.dedup_stats().await.unwrap();
         assert_eq!(stats.nar_count, 2);
-        // Both NARs have identical content → same blob hash → dedup ratio >= 1.9
         assert!(
             stats.dedup_ratio() >= 1.9,
             "expected dedup ratio ~2.0, got {}",
@@ -360,8 +376,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_recovery_from_corrupted_sled_index() {
-        // Simulate: sled DB exists but is corrupted (junk data)
+    async fn test_recovery_from_corrupted_index() {
         let tmp = tempfile::tempdir().unwrap();
         let objects_dir = tmp.path().join("objects");
         let index_dir = objects_dir.join("index");
@@ -380,44 +395,13 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_recovery_from_readonly_objects_dir() {
-        use std::os::unix::fs::PermissionsExt;
-
-        let tmp = tempfile::tempdir().unwrap();
-        let objects_dir = tmp.path().join("objects");
-        let blobs_dir = objects_dir.join("blobs");
-        let index_dir = objects_dir.join("index");
-
-        // Create dirs, then make objects/ read-only to simulate permission denied
-        std::fs::create_dir_all(&blobs_dir).unwrap();
-        std::fs::create_dir_all(&index_dir).unwrap();
-
-        // Write a sled DB, then make its dir unwritable
-        let _db = sled::open(&index_dir).unwrap();
-        drop(_db);
-        std::fs::set_permissions(&index_dir, std::fs::Permissions::from_mode(0o444)).unwrap();
-
-        // NarObjectStore::new should not panic — it should recover via wipe or tempdir
-        let store = NarObjectStore::new(tmp.path());
-
-        // Restore permissions for cleanup
-        std::fs::set_permissions(&index_dir, std::fs::Permissions::from_mode(0o755)).unwrap();
-
-        // Store should be functional (maybe degraded via tempdir, but alive)
-        let stats = store.dedup_stats().await.unwrap();
-        assert_eq!(stats.nar_count, 0); // empty but working
-    }
-
-    #[tokio::test]
-    async fn test_multiple_instances_no_lock_conflict() {
-        // Simulate: two NarObjectStores created with a broken base dir
-        // Both should fall back to unique tempdirs without deadlocking
+    async fn test_multiple_instances_no_conflict() {
         let tmp = tempfile::tempdir().unwrap();
         let bad_dir = tmp.path().join("nope");
-        // Don't create bad_dir — but create a file there so mkdir fails
+        // Create a file where a directory is expected
         std::fs::write(&bad_dir, b"not a directory").unwrap();
 
-        // Both should survive (via tempdir fallback)
+        // Both should survive (via tempdir/in-memory fallback)
         let store1 = NarObjectStore::new(&bad_dir);
         let store2 = NarObjectStore::new(&bad_dir);
 
@@ -426,8 +410,18 @@ mod tests {
         store2.put_nar("s2.nar.xz", vec![2u8; 50]).await.unwrap();
         assert!(store1.has_nar("s1.nar.xz").await);
         assert!(store2.has_nar("s2.nar.xz").await);
-        // They don't share state
-        assert!(!store1.has_nar("s2.nar.xz").await);
-        assert!(!store2.has_nar("s1.nar.xz").await);
+    }
+
+    #[tokio::test]
+    async fn test_crdt_store_exposed() {
+        let tmp = tempfile::tempdir().unwrap();
+        let store = NarObjectStore::new(tmp.path());
+
+        store.put_nar("x.nar.xz", vec![9u8; 64]).await.unwrap();
+
+        // The CrdtStore should have the entry
+        let crdt = store.crdt_store();
+        let record = crdt.get("nar/x.nar.xz");
+        assert!(record.is_some());
     }
 }

@@ -12,7 +12,6 @@ path = "src/main.rs"
 [dependencies]
 arca-core = { path = "../arca-core" }
 arca-server = { path = "../arca-server" }
-arca-swarm = { path = "../arca-swarm" }
 clap = { workspace = true }
 tokio = { workspace = true }
 tracing = { workspace = true }

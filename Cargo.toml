@@ -25,7 +25,9 @@ walkdir = "2"
 tempfile = "3"
 snow = "0.9"
 rand = "0.8"
-pluresdb-storage = { git = "https://github.com/plures/pluresdb.git", rev = "fcac0f2d", features = ["native"] }
+pluresdb = { git = "https://github.com/plures/pluresdb.git", rev = "68436c57" }
+pluresdb-storage = { git = "https://github.com/plures/pluresdb.git", rev = "68436c57", features = ["native"] }
+pluresdb-sync = { git = "https://github.com/plures/pluresdb.git", rev = "68436c57" }
 base64 = "0.22"
 ed25519-dalek = { version = "2", features = ["rand_core"] }
 sled = "0.34"
