@@ -112,14 +112,14 @@
 
             bind = lib.mkOption {
               type = lib.types.str;
-              default = "127.0.0.1";
-              description = "Address to bind the HTTP server";
+              default = "0.0.0.0";
+              description = "Address to bind the HTTP server. Defaults to all interfaces for LAN sharing.";
             };
 
             openFirewall = lib.mkOption {
               type = lib.types.bool;
-              default = false;
-              description = "Whether to open the firewall for the cache port";
+              default = true;
+              description = "Whether to open the firewall for the cache port. Defaults to true for LAN sharing.";
             };
 
             postBuildHook = lib.mkOption {
@@ -147,12 +147,29 @@
             };
 
             sync = {
-              enable = lib.mkEnableOption "PluresDB Hyperswarm P2P sync";
+              enable = lib.mkOption {
+                type = lib.types.bool;
+                default = true;
+                description = "Whether to enable P2P sync via PluresDB Hyperswarm. Enabled by default — all arca nodes share narinfo metadata with peers on the same topic.";
+              };
 
-              topic = lib.mkOption {
+              publicTopic = lib.mkOption {
                 type = lib.types.str;
-                default = "pares-arca-public";
-                description = "Hyperswarm topic key. Nodes with the same topic auto-replicate narinfo metadata via PluresDB's built-in CRDT sync.";
+                default = "pares-arca-nixos-public";
+                description = ''Hyperswarm topic for sharing official nixos.org
+                  package narinfos. All arca nodes join this topic by default,
+                  forming a global P2P cache network for packages fetched from
+                  cache.nixos.org. Set to "" to disable the public topic
+                  (e.g., air-gapped or corporate networks).'';
+              };
+
+              extraTopics = lib.mkOption {
+                type = lib.types.listOf lib.types.str;
+                default = [];
+                description = ''Additional private sync topics. Use for
+                  team/org caches, personal packages, or internal-only sharing.
+                  Each topic forms an independent P2P swarm.'';
+                example = [ "myteam-private-cache" "corp-internal-builds" ];
               };
             };
           };
@@ -213,7 +230,13 @@
                     exec ${self.packages.${pkgs.system}.default}/bin/pares-arca sign --key-file ${effectiveSecretKeyPath}
                   ''}"
                 ];
-                ExecStart = "${self.packages.${pkgs.system}.default}/bin/pares-arca serve --bind ${cfg.bind}:${toString cfg.port}${lib.optionalString cfg.sync.enable " --sync-topic ${cfg.sync.topic}"}";
+                ExecStart = let
+                  # Build list of all sync topics: public (if set) + extras
+                  allTopics =
+                    (lib.optional (cfg.sync.enable && cfg.sync.publicTopic != "") cfg.sync.publicTopic)
+                    ++ (lib.optionals cfg.sync.enable cfg.sync.extraTopics);
+                  syncArgs = lib.concatMapStrings (t: " --sync-topic ${t}") allTopics;
+                in "${self.packages.${pkgs.system}.default}/bin/pares-arca serve --bind ${cfg.bind}:${toString cfg.port}${syncArgs}";
                 DynamicUser = true;
                 CacheDirectory = "pares-arca";
                 StateDirectory = "pares-arca";
