@@ -63,7 +63,7 @@
       nixosModules.default = { config, lib, pkgs, ... }:
         let
           cfg = config.services.pares-arca;
-          # Resolve effective signing key: explicit secretKeyFile > auto-generated > none
+          # Resolve effective signing key path
           effectiveSecretKeyPath =
             if cfg.secretKeyFile != null then cfg.secretKeyFile
             else if cfg.autoSigningKey then "${cfg.signingKeyDir}/secret-key.pem"
@@ -76,11 +76,11 @@
             fi
 
             set -f
-            # Import paths into cache
-            ${lib.optionalString (cfg.requireSignatures && effectiveSecretKeyPath != null) ''
+            # Import paths into cache, always signing (signing is cheap ed25519)
+            ${lib.optionalString (effectiveSecretKeyPath != null) ''
             SIGN_ARG="--signing-key ${effectiveSecretKeyPath}"
             ''}
-            ${lib.optionalString (!(cfg.requireSignatures && effectiveSecretKeyPath != null)) ''
+            ${lib.optionalString (effectiveSecretKeyPath == null) ''
             SIGN_ARG=""
             ''}
             for path in $OUT_PATHS; do
@@ -131,23 +131,13 @@
             autoSigningKey = lib.mkOption {
               type = lib.types.bool;
               default = true;
-              description = "Automatically generate a signing key pair on first start if none exists. Sets secretKeyFile and trusted-public-keys automatically.";
-            };
-
-            requireSignatures = lib.mkOption {
-              type = lib.types.bool;
-              default = false;
-              description = ''
-                Whether to require NAR signatures for paths served from this cache.
-                Default false for zero-config local operation (localhost is inherently trusted).
-                Enable when serving to untrusted network clients or using P2P sync.
-              '';
+              description = "Automatically generate a signing key pair on first start if none exists.";
             };
 
             logLevel = lib.mkOption {
               type = lib.types.enum [ "error" "warn" "info" "debug" "trace" ];
               default = "info";
-              description = "Log level for the pares-arca server. Set to 'debug' for troubleshooting.";
+              description = "Log level for the pares-arca server.";
             };
 
             signingKeyDir = lib.mkOption {
@@ -167,21 +157,14 @@
             };
           };
 
-          config = lib.mkIf cfg.enable (
-            let
-              # Resolve the effective secret key path: explicit > auto-generated
-              effectiveSecretKey =
-                if cfg.secretKeyFile != null then cfg.secretKeyFile
-                else if cfg.autoSigningKey then "${cfg.signingKeyDir}/secret-key.pem"
-                else null;
-              effectivePublicKeyFile =
-                if cfg.autoSigningKey && cfg.secretKeyFile == null
-                then "${cfg.signingKeyDir}/public-key.pem"
-                else null;
-              hostname = config.networking.hostName or "pares-arca";
-            in {
-            # Auto-generate signing key pair on first activation (only when signatures required)
-            system.activationScripts.pares-arca-signing-key = lib.mkIf (cfg.requireSignatures && cfg.autoSigningKey) ''
+          config = lib.mkIf cfg.enable (let
+            hostname = config.networking.hostName or "pares-arca";
+          in {
+            # ── Key Generation ────────────────────────────────────────────
+            # Generate signing key on first activation. Runs before nix-daemon
+            # restarts during nixos-rebuild switch, so the key exists by the
+            # time the daemon reads secret-key-files.
+            system.activationScripts.pares-arca-signing-key = lib.mkIf cfg.autoSigningKey ''
               KEY_DIR="${cfg.signingKeyDir}"
               SECRET="$KEY_DIR/secret-key.pem"
               PUBLIC="$KEY_DIR/public-key.pem"
@@ -192,19 +175,40 @@
                   "${hostname}-pares-arca-1" "$SECRET" "$PUBLIC"
                 chmod 600 "$SECRET"
                 chmod 644 "$PUBLIC"
-                chmod 755 "$KEY_DIR"  # Directory must be traversable by all users
+                chmod 755 "$KEY_DIR"
                 echo "[pares-arca] Signing key generated. Public key:"
                 cat "$PUBLIC"
               fi
             '';
 
+            # ── Nix Daemon Configuration ──────────────────────────────────
+            # secret-key-files tells the nix daemon: "I own these keys, trust
+            # paths signed by their public counterparts." This is the mechanism
+            # designed for local binary caches — no !include, no manual
+            # trusted-public-keys, no timing issues.
+            #
+            # From the Nix manual: "A trusted key is one listed in
+            # trusted-public-keys, or a public key counterpart to a private
+            # key stored in a file listed in secret-key-files."
+            nix.settings = {
+              substituters = [ "http://localhost:${toString cfg.port}" ];
+              trusted-substituters = [ "http://localhost:${toString cfg.port}" ];
+              secret-key-files = lib.optional (effectiveSecretKeyPath != null) effectiveSecretKeyPath;
+            };
+
+            # post-build-hook imports every build into the local cache
+            nix.extraOptions = lib.mkIf cfg.postBuildHook ''
+              post-build-hook = ${postBuildHookScript}
+            '';
+
+            # ── Service ───────────────────────────────────────────────────
             systemd.services.pares-arca = {
               description = "Pares Arca - Nix binary cache";
               after = [ "network.target" ];
               wantedBy = [ "multi-user.target" ];
 
               serviceConfig = {
-                ExecStartPre = lib.optionals (cfg.requireSignatures && effectiveSecretKeyPath != null) [
+                ExecStartPre = lib.optionals (effectiveSecretKeyPath != null) [
                   "+${pkgs.writeShellScript "pares-arca-sign" ''
                     exec ${self.packages.${pkgs.system}.default}/bin/pares-arca sign --key-file ${effectiveSecretKeyPath}
                   ''}"
@@ -222,54 +226,9 @@
               };
             };
 
-            # ── PluresDB Sync (built into serve process) ──────────────────
-            # When sync.enable is true, the main pares-arca serve process
-            # automatically joins the Hyperswarm DHT topic and replicates
-            # narinfo metadata to all peers. No separate service needed.
-
+            # ── Firewall ──────────────────────────────────────────────────
             networking.firewall.allowedTCPPorts =
               lib.optional cfg.openFirewall cfg.port;
-
-            networking.firewall.allowedUDPPorts = [];
-
-            # Auto-configure Nix to use local cache
-            # Always use localhost for the client URL - bind address (e.g. 0.0.0.0)
-            # is for the server socket, not the client connection.
-            nix.settings = {
-              substituters = [ "http://localhost:${toString cfg.port}" ];
-              trusted-substituters = [ "http://localhost:${toString cfg.port}" ];
-            } // lib.optionalAttrs (!cfg.requireSignatures) {
-              require-sigs = false;
-            };
-
-            # post-build-hook is a top-level nix option, not under settings
-            nix.extraOptions = lib.mkMerge [
-              (lib.mkIf cfg.postBuildHook ''
-                post-build-hook = ${postBuildHookScript}
-              '')
-              (lib.mkIf (cfg.requireSignatures && cfg.autoSigningKey && cfg.secretKeyFile == null) ''
-                !include ${cfg.signingKeyDir}/nix-trusted-key.conf
-              '')
-            ];
-
-            # Generate a nix config snippet alongside the key pair
-            # Uses extra-trusted-public-keys (APPENDS) not trusted-public-keys (REPLACES)
-            system.activationScripts.pares-arca-trust-key = lib.mkIf (cfg.requireSignatures && cfg.autoSigningKey && cfg.secretKeyFile == null) (lib.stringAfter [ "pares-arca-signing-key" ] ''
-              KEY_DIR="${cfg.signingKeyDir}"
-              PUBLIC="$KEY_DIR/public-key.pem"
-              CONF="$KEY_DIR/nix-trusted-key.conf"
-              if [ -f "$PUBLIC" ]; then
-                PUB_KEY=$(cat "$PUBLIC")
-                echo "extra-trusted-public-keys = $PUB_KEY" > "$CONF"
-                # Public keys + trust config must be world-readable.
-                # The nix client runs as the calling user and parses !include directives.
-                # Secret key stays 600. Directory must be traversable (755).
-                chmod 755 "$KEY_DIR"
-                chmod 644 "$PUBLIC"
-                chmod 644 "$CONF"
-                echo "[pares-arca] Nix trusts local cache key: $PUB_KEY"
-              fi
-            '');
           });
         };
     };
