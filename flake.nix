@@ -1,5 +1,5 @@
 {
-  description = "Pares Arca — distributed Nix binary cache with P2P sync";
+  description = "Pares Arca - distributed Nix binary cache with P2P sync";
 
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
@@ -76,11 +76,11 @@
             fi
 
             set -f
-            # Import paths into cache — sign during import so narinfos are served with signatures
-            ${lib.optionalString (effectiveSecretKeyPath != null) ''
+            # Import paths into cache
+            ${lib.optionalString (cfg.requireSignatures && effectiveSecretKeyPath != null) ''
             SIGN_ARG="--signing-key ${effectiveSecretKeyPath}"
             ''}
-            ${lib.optionalString (effectiveSecretKeyPath == null) ''
+            ${lib.optionalString (!(cfg.requireSignatures && effectiveSecretKeyPath != null)) ''
             SIGN_ARG=""
             ''}
             for path in $OUT_PATHS; do
@@ -134,6 +134,16 @@
               description = "Automatically generate a signing key pair on first start if none exists. Sets secretKeyFile and trusted-public-keys automatically.";
             };
 
+            requireSignatures = lib.mkOption {
+              type = lib.types.bool;
+              default = false;
+              description = ''
+                Whether to require NAR signatures for paths served from this cache.
+                Default false for zero-config local operation (localhost is inherently trusted).
+                Enable when serving to untrusted network clients or using P2P sync.
+              '';
+            };
+
             logLevel = lib.mkOption {
               type = lib.types.enum [ "error" "warn" "info" "debug" "trace" ];
               default = "info";
@@ -170,8 +180,8 @@
                 else null;
               hostname = config.networking.hostName or "pares-arca";
             in {
-            # Auto-generate signing key pair on first activation
-            system.activationScripts.pares-arca-signing-key = lib.mkIf cfg.autoSigningKey ''
+            # Auto-generate signing key pair on first activation (only when signatures required)
+            system.activationScripts.pares-arca-signing-key = lib.mkIf (cfg.requireSignatures && cfg.autoSigningKey) ''
               KEY_DIR="${cfg.signingKeyDir}"
               SECRET="$KEY_DIR/secret-key.pem"
               PUBLIC="$KEY_DIR/public-key.pem"
@@ -189,12 +199,12 @@
             '';
 
             systemd.services.pares-arca = {
-              description = "Pares Arca — Nix binary cache";
+              description = "Pares Arca - Nix binary cache";
               after = [ "network.target" ];
               wantedBy = [ "multi-user.target" ];
 
               serviceConfig = {
-                ExecStartPre = lib.optionals (effectiveSecretKeyPath != null) [
+                ExecStartPre = lib.optionals (cfg.requireSignatures && effectiveSecretKeyPath != null) [
                   "+${pkgs.writeShellScript "pares-arca-sign" ''
                     exec ${self.packages.${pkgs.system}.default}/bin/pares-arca sign --key-file ${effectiveSecretKeyPath}
                   ''}"
@@ -223,11 +233,13 @@
             networking.firewall.allowedUDPPorts = [];
 
             # Auto-configure Nix to use local cache
-            # Always use localhost for the client URL — bind address (e.g. 0.0.0.0)
+            # Always use localhost for the client URL - bind address (e.g. 0.0.0.0)
             # is for the server socket, not the client connection.
             nix.settings = {
               substituters = [ "http://localhost:${toString cfg.port}" ];
               trusted-substituters = [ "http://localhost:${toString cfg.port}" ];
+            } // lib.optionalAttrs (!cfg.requireSignatures) {
+              require-sigs = false;
             };
 
             # post-build-hook is a top-level nix option, not under settings
@@ -235,14 +247,14 @@
               (lib.mkIf cfg.postBuildHook ''
                 post-build-hook = ${postBuildHookScript}
               '')
-              (lib.mkIf (cfg.autoSigningKey && cfg.secretKeyFile == null) ''
+              (lib.mkIf (cfg.requireSignatures && cfg.autoSigningKey && cfg.secretKeyFile == null) ''
                 !include ${cfg.signingKeyDir}/nix-trusted-key.conf
               '')
             ];
 
             # Generate a nix config snippet alongside the key pair
             # Uses extra-trusted-public-keys (APPENDS) not trusted-public-keys (REPLACES)
-            system.activationScripts.pares-arca-trust-key = lib.mkIf (cfg.autoSigningKey && cfg.secretKeyFile == null) (lib.stringAfter [ "pares-arca-signing-key" ] ''
+            system.activationScripts.pares-arca-trust-key = lib.mkIf (cfg.requireSignatures && cfg.autoSigningKey && cfg.secretKeyFile == null) (lib.stringAfter [ "pares-arca-signing-key" ] ''
               KEY_DIR="${cfg.signingKeyDir}"
               PUBLIC="$KEY_DIR/public-key.pem"
               CONF="$KEY_DIR/nix-trusted-key.conf"
