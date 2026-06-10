@@ -49,10 +49,12 @@ enum Commands {
         #[arg(long, default_value = "127.0.0.1:5555")]
         bind: String,
 
-        /// PluresDB sync topic for P2P replication. When set, narinfo metadata
-        /// replicates to all peers on the same topic via Hyperswarm.
-        #[arg(long, env = "PARES_ARCA_SYNC_TOPIC")]
-        sync_topic: Option<String>,
+        /// PluresDB sync topics for P2P replication. Each topic forms an
+        /// independent swarm. Narinfo metadata replicates to all peers on the
+        /// same topic via Hyperswarm. Can be specified multiple times.
+        /// Via env: comma-separated list.
+        #[arg(long, env = "PARES_ARCA_SYNC_TOPIC", value_delimiter = ',')]
+        sync_topic: Vec<String>,
     },
 
     /// Import a single Nix store path
@@ -208,22 +210,22 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 _ => Box::new(arca_core::FsNarinfoStore::new(&cache_dir)),
             };
 
-            // Start PluresDB Hyperswarm sync if topic is configured
-            let _sync_handle = if let Some(ref topic) = sync_topic {
+            // Start PluresDB Hyperswarm sync for each configured topic
+            let mut _sync_handles = Vec::new();
+            if !sync_topic.is_empty() {
                 let nar_store = arca_core::NarObjectStore::new(&cache_dir);
-                match arca_core::sync::start_sync(nar_store.crdt_store().clone(), topic) {
-                    Ok(handle) => {
-                        println!("🌐 P2P sync active — topic: {topic}");
-                        Some(handle)
-                    }
-                    Err(e) => {
-                        eprintln!("⚠️  Failed to start sync: {e}");
-                        None
+                for topic in &sync_topic {
+                    match arca_core::sync::start_sync(nar_store.crdt_store().clone(), topic) {
+                        Ok(handle) => {
+                            println!("🌐 P2P sync active — topic: {topic}");
+                            _sync_handles.push(handle);
+                        }
+                        Err(e) => {
+                            eprintln!("⚠️  Failed to start sync for topic '{topic}': {e}");
+                        }
                     }
                 }
-            } else {
-                None
-            };
+            }
 
             arca_server::serve(server_backend, cache_dir, None, &bind).await?;
         }
