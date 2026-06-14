@@ -115,11 +115,15 @@ enum Commands {
         max_size: Option<String>,
     },
 
-    /// Sign all unsigned narinfos in the cache
+    /// Sign all unsigned narinfos in the cache (or re-sign all with --force)
     Sign {
         /// Path to ed25519 signing key file
         #[arg(long)]
         key_file: PathBuf,
+
+        /// Re-sign all narinfos, even those that already have a signature
+        #[arg(long)]
+        force: bool,
     },
 }
 
@@ -420,10 +424,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             );
         }
 
-        Commands::Sign { key_file } => {
+        Commands::Sign { key_file, force } => {
             let sk = arca_core::CacheSigningKey::from_file(&key_file)
                 .map_err(|e| format!("Failed to load signing key: {e}"))?;
-            println!("🔑 Signing unsigned narinfos with key: {}", sk.name());
+            if force {
+                println!("🔄 Re-signing ALL narinfos with key: {}", sk.name());
+            } else {
+                println!("🔑 Signing unsigned narinfos with key: {}", sk.name());
+            }
 
             let mut signed = 0usize;
             let mut already_signed = 0usize;
@@ -445,7 +453,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     Err(_) => { errors += 1; continue; }
                 };
 
-                if content.lines().any(|l| l.starts_with("Sig:")) {
+                if !force && content.lines().any(|l| l.starts_with("Sig:")) {
                     already_signed += 1;
                     continue;
                 }
@@ -462,7 +470,16 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     &info.references,
                 );
 
-                let mut new_content = content.clone();
+                // When force-resigning, strip existing Sig lines
+                let base_content: String = if force {
+                    content.lines()
+                        .filter(|l| !l.starts_with("Sig:"))
+                        .collect::<Vec<_>>()
+                        .join("\n")
+                } else {
+                    content.clone()
+                };
+                let mut new_content = base_content;
                 if !new_content.ends_with('\n') {
                     new_content.push('\n');
                 }

@@ -227,7 +227,7 @@
               serviceConfig = {
                 ExecStartPre = lib.optionals (effectiveSecretKeyPath != null) [
                   "+${pkgs.writeShellScript "pares-arca-sign" ''
-                    exec ${self.packages.${pkgs.system}.default}/bin/pares-arca sign --key-file ${effectiveSecretKeyPath}
+                    exec ${self.packages.${pkgs.system}.default}/bin/pares-arca sign --key-file ${effectiveSecretKeyPath} --force
                   ''}"
                 ];
                 ExecStart = let
