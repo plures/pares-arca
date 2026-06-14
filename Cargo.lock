@@ -147,6 +147,7 @@ dependencies = [
  "hex",
  "pluresdb",
  "pluresdb-storage",
+ "pluresdb-sync",
  "rand 0.8.6",
  "serde",
  "serde_json",

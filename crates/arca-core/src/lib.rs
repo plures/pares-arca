@@ -28,6 +28,7 @@ pub mod config;
 pub mod error;
 pub mod gc;
 pub mod narinfo;
+pub mod nix_base32;
 pub mod object_store;
 pub mod signing;
 pub mod sled_store;

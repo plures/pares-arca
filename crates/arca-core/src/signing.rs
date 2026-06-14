@@ -16,6 +16,31 @@ use rand::rngs::OsRng;
 use std::path::Path;
 
 use crate::error::ArcaError;
+use crate::nix_base32;
+
+/// Normalize a hash string to nix-base32 format.
+///
+/// Handles:
+/// - `sha256:<hex>` → `sha256:<nix-base32>`
+/// - `sha256:<nix-base32>` → unchanged (already 52 chars for sha256)
+/// - Other formats → passed through unchanged
+fn normalize_hash_to_nix_base32(hash: &str) -> String {
+    if let Some(hex_str) = hash.strip_prefix("sha256:") {
+        // SHA-256 in nix-base32 is exactly 52 chars
+        if hex_str.len() == 52 {
+            // Already nix-base32
+            return hash.to_string();
+        }
+        if hex_str.len() == 64 {
+            // Hex-encoded SHA-256 (32 bytes = 64 hex chars)
+            if let Ok(bytes) = hex::decode(hex_str) {
+                return format!("sha256:{}", nix_base32::encode(&bytes));
+            }
+        }
+    }
+    // Unknown format or already correct, pass through
+    hash.to_string()
+}
 
 /// An ed25519 signing key with a human-readable name.
 pub struct CacheSigningKey {
@@ -92,7 +117,14 @@ impl CacheSigningKey {
     ///
     /// Nix expects full store paths in the fingerprint, even though narinfo
     /// files store references as basenames only.
+    ///
+    /// IMPORTANT: The nar_hash MUST be in the format `sha256:<nix-base32>`.
+    /// Nix always uses `printHash32()` (nix-base32) when building the
+    /// fingerprint for signature verification, regardless of what encoding
+    /// is used in the narinfo file itself.
     pub fn fingerprint(store_path: &str, nar_hash: &str, nar_size: u64, refs: &[String]) -> String {
+        // Normalize hash to nix-base32 if it's in hex format
+        let normalized_hash = normalize_hash_to_nix_base32(nar_hash);
         let full_refs: Vec<String> = refs
             .iter()
             .map(|r| {
@@ -106,7 +138,7 @@ impl CacheSigningKey {
         format!(
             "1;{};{};{};{}",
             store_path,
-            nar_hash,
+            normalized_hash,
             nar_size,
             full_refs.join(",")
         )

@@ -133,11 +133,12 @@ impl CacheStore {
         let nar_data = &nar_output.stdout;
         let nar_size = nar_data.len() as u64;
 
-        // 2. Hash the uncompressed NAR
+        // 2. Hash the uncompressed NAR (Nix base32 format for fingerprint compatibility)
         let nar_hash = {
             let mut hasher = Sha256::new();
             hasher.update(nar_data);
-            format!("sha256:{}", hex::encode(hasher.finalize()))
+            let digest = hasher.finalize();
+            format!("sha256:{}", crate::nix_base32::encode(&digest))
         };
 
         // 3. Compress with selected algorithm
@@ -164,7 +165,8 @@ impl CacheStore {
         let file_hash = {
             let mut hasher = Sha256::new();
             hasher.update(&compressed);
-            format!("sha256:{}", hex::encode(hasher.finalize()))
+            let digest = hasher.finalize();
+            format!("sha256:{}", crate::nix_base32::encode(&digest))
         };
 
         // 4. Write compressed NAR to plures-object store (chunked, deduplicated)
