@@ -207,8 +207,11 @@
             # From the Nix manual: "A trusted key is one listed in
             # trusted-public-keys, or a public key counterpart to a private
             # key stored in a file listed in secret-key-files."
+            # Add Arca alongside (rather than instead of) Nix's configured
+            # upstream substituters, preserving cache.nixos.org and any
+            # organization cache supplied by the host configuration.
             nix.settings = {
-              substituters = [ "http://localhost:${toString cfg.port}" ];
+              extra-substituters = [ "http://localhost:${toString cfg.port}" ];
               trusted-substituters = [ "http://localhost:${toString cfg.port}" ];
               secret-key-files = lib.optional (effectiveSecretKeyPath != null) effectiveSecretKeyPath;
             };
