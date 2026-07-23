@@ -23,6 +23,18 @@ pub enum SegmentFilter {
     All,
 }
 
+impl std::str::FromStr for SegmentFilter {
+    type Err = String;
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s.to_lowercase().as_str() {
+            "nixpkgs" => Ok(SegmentFilter::Nixpkgs),
+            "custom" => Ok(SegmentFilter::Custom),
+            "all" => Ok(SegmentFilter::All),
+            other => Err(format!("unknown filter: {other} (expected nixpkgs, custom, or all)")),
+        }
+    }
+}
+
 /// A single cache segment with its own topic key and filter.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CacheSegment {
@@ -108,6 +120,9 @@ pub enum ConfigError {
     #[error("segment '{name}' is missing required field 'name'")]
     MissingName { name: String },
 
+    #[error("segment '{name}' already exists")]
+    DuplicateSegment { name: String },
+
     #[error("I/O error: {0}")]
     Io(#[from] std::io::Error),
 
@@ -189,6 +204,33 @@ impl CacheConfig {
     /// Get segment by name.
     pub fn segment_by_name(&self, name: &str) -> Option<&CacheSegment> {
         self.segments.iter().find(|s| s.name == name)
+    }
+
+    /// Add a new segment. Returns an error if a segment with the same name
+    /// already exists, or if the segment fails validation.
+    pub fn add_segment(&mut self, segment: CacheSegment) -> Result<(), ConfigError> {
+        if self.segments.iter().any(|s| s.name == segment.name) {
+            return Err(ConfigError::DuplicateSegment {
+                name: segment.name.clone(),
+            });
+        }
+        if segment.topic_key.len() != 64
+            || !segment.topic_key.chars().all(|c| c.is_ascii_hexdigit())
+        {
+            return Err(ConfigError::InvalidTopicKey {
+                name: segment.name.clone(),
+                len: segment.topic_key.len(),
+            });
+        }
+        self.segments.push(segment);
+        Ok(())
+    }
+
+    /// Remove a segment by name. Returns true if a segment was removed.
+    pub fn remove_segment(&mut self, name: &str) -> bool {
+        let before = self.segments.len();
+        self.segments.retain(|s| s.name != name);
+        self.segments.len() != before
     }
 }
 
@@ -342,6 +384,75 @@ mod tests {
             .segment_for_path("/nix/store/abc123def456ghi789jkl012mno345pq-source")
             .unwrap();
         assert_eq!(seg.name, "custom");
+    }
+
+    #[test]
+    fn test_add_segment_success() {
+        let mut config = CacheConfig::default();
+        config
+            .add_segment(CacheSegment {
+                name: "team".to_string(),
+                topic_key: "b1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0c1d2e3f4a5b6c7d8e9f0a1b2"
+                    .to_string(),
+                description: "Team cache".to_string(),
+                filter: SegmentFilter::Custom,
+            })
+            .unwrap();
+        assert_eq!(config.segments.len(), 2);
+        assert!(config.segment_by_name("team").is_some());
+    }
+
+    #[test]
+    fn test_add_segment_duplicate_name_fails() {
+        let mut config = CacheConfig::default();
+        let result = config.add_segment(CacheSegment {
+            name: "universal".to_string(),
+            topic_key: "b1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0c1d2e3f4a5b6c7d8e9f0a1b2"
+                .to_string(),
+            description: "".to_string(),
+            filter: SegmentFilter::All,
+        });
+        assert!(matches!(result, Err(ConfigError::DuplicateSegment { .. })));
+        assert_eq!(config.segments.len(), 1);
+    }
+
+    #[test]
+    fn test_add_segment_invalid_topic_key_fails() {
+        let mut config = CacheConfig::default();
+        let result = config.add_segment(CacheSegment {
+            name: "bad".to_string(),
+            topic_key: "short".to_string(),
+            description: "".to_string(),
+            filter: SegmentFilter::All,
+        });
+        assert!(matches!(result, Err(ConfigError::InvalidTopicKey { .. })));
+        assert_eq!(config.segments.len(), 1);
+    }
+
+    #[test]
+    fn test_remove_segment() {
+        let mut config = CacheConfig::default();
+        config
+            .add_segment(CacheSegment {
+                name: "team".to_string(),
+                topic_key: "b1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0c1d2e3f4a5b6c7d8e9f0a1b2"
+                    .to_string(),
+                description: "".to_string(),
+                filter: SegmentFilter::Custom,
+            })
+            .unwrap();
+        assert!(config.remove_segment("team"));
+        assert_eq!(config.segments.len(), 1);
+        assert!(!config.remove_segment("nonexistent"));
+    }
+
+    #[test]
+    fn test_segment_filter_from_str() {
+        use std::str::FromStr;
+        assert_eq!(SegmentFilter::from_str("nixpkgs").unwrap(), SegmentFilter::Nixpkgs);
+        assert_eq!(SegmentFilter::from_str("CUSTOM").unwrap(), SegmentFilter::Custom);
+        assert_eq!(SegmentFilter::from_str("all").unwrap(), SegmentFilter::All);
+        assert!(SegmentFilter::from_str("bogus").is_err());
     }
 
     #[test]

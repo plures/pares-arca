@@ -125,6 +125,62 @@ enum Commands {
         #[arg(long)]
         force: bool,
     },
+
+    /// Manage cache segments ("topics"): create, join, list, remove
+    Topics {
+        #[command(subcommand)]
+        action: TopicsAction,
+    },
+
+    /// Show cache statistics (paths, size, dedup) — machine-readable with --json
+    CacheStats {
+        /// Emit JSON instead of human-readable text
+        #[arg(long)]
+        json: bool,
+    },
+}
+
+#[derive(Subcommand)]
+enum TopicsAction {
+    /// List configured segments/topics
+    List,
+
+    /// Create a new private segment with a freshly generated topic key
+    Create {
+        /// Segment name
+        name: String,
+
+        /// Which store paths this segment handles: nixpkgs, custom, or all
+        #[arg(long, default_value = "custom")]
+        filter: String,
+
+        /// Optional human-readable description
+        #[arg(long, default_value = "")]
+        description: String,
+    },
+
+    /// Join an existing segment using a shared topic key
+    Join {
+        /// Segment name
+        name: String,
+
+        /// 256-bit hex-encoded topic key (from `pares-arca keygen` on another machine)
+        topic_key: String,
+
+        /// Which store paths this segment handles: nixpkgs, custom, or all
+        #[arg(long, default_value = "custom")]
+        filter: String,
+
+        /// Optional human-readable description
+        #[arg(long, default_value = "")]
+        description: String,
+    },
+
+    /// Remove a segment/topic by name
+    Remove {
+        /// Segment name
+        name: String,
+    },
 }
 
 fn default_cache_dir() -> PathBuf {
@@ -493,6 +549,124 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             }
 
             println!("✅ Signed: {signed}, already signed: {already_signed}, errors: {errors}, total: {total}");
+        }
+
+        Commands::Topics { action } => {
+            let mut config = arca_core::CacheConfig::load_or_create(&config_path)?;
+            match action {
+                TopicsAction::List => {
+                    if config.segments.is_empty() {
+                        println!("No segments configured.");
+                    } else {
+                        println!("📋 Configured segments ({}):", config.segments.len());
+                        for seg in &config.segments {
+                            println!("   • {} — filter: {:?}", seg.name, seg.filter);
+                            if !seg.description.is_empty() {
+                                println!("     {}", seg.description);
+                            }
+                            println!("     topic_key: {}", seg.topic_key);
+                        }
+                    }
+                }
+
+                TopicsAction::Create {
+                    name,
+                    filter,
+                    description,
+                } => {
+                    use rand::RngCore;
+                    let mut key = [0u8; 32];
+                    rand::rngs::OsRng.fill_bytes(&mut key);
+                    let topic_key = hex::encode(key);
+                    let seg_filter: arca_core::SegmentFilter =
+                        filter.parse().map_err(|e: String| e)?;
+                    config.add_segment(arca_core::CacheSegment {
+                        name: name.clone(),
+                        topic_key: topic_key.clone(),
+                        description,
+                        filter: seg_filter,
+                    })?;
+                    config.write_to(&config_path)?;
+                    println!("✅ Created segment '{name}'");
+                    println!("   Topic key: {topic_key}");
+                    println!("   Share this key with peers to let them join: pares-arca topics join {name} {topic_key}");
+                }
+
+                TopicsAction::Join {
+                    name,
+                    topic_key,
+                    filter,
+                    description,
+                } => {
+                    let seg_filter: arca_core::SegmentFilter =
+                        filter.parse().map_err(|e: String| e)?;
+                    config.add_segment(arca_core::CacheSegment {
+                        name: name.clone(),
+                        topic_key: topic_key.clone(),
+                        description,
+                        filter: seg_filter,
+                    })?;
+                    config.write_to(&config_path)?;
+                    println!("✅ Joined segment '{name}' with shared topic key");
+                }
+
+                TopicsAction::Remove { name } => {
+                    if config.remove_segment(&name) {
+                        config.write_to(&config_path)?;
+                        println!("✅ Removed segment '{name}'");
+                    } else {
+                        eprintln!("Error: no segment named '{name}'");
+                        std::process::exit(1);
+                    }
+                }
+            }
+        }
+
+        Commands::CacheStats { json } => {
+            let count = backend.count();
+            let narinfo_size = backend.total_narinfo_size();
+            let nar_store = arca_core::NarObjectStore::new(&cache_dir);
+            let dedup = nar_store.dedup_stats().await.ok();
+
+            if json {
+                let mut body = serde_json::json!({
+                    "cached_paths": count,
+                    "total_narinfo_size_bytes": narinfo_size,
+                    "cache_dir": cache_dir.display().to_string(),
+                    "backend": cli.backend,
+                });
+                if let Some(stats) = &dedup {
+                    body["object_store"] = serde_json::json!({
+                        "nar_count": stats.nar_count,
+                        "total_nar_bytes": stats.total_nar_bytes,
+                        "unique_chunk_bytes": stats.unique_chunk_bytes,
+                        "unique_chunks": stats.unique_chunks,
+                        "dedup_ratio": stats.dedup_ratio(),
+                    });
+                }
+                println!("{}", serde_json::to_string_pretty(&body)?);
+            } else {
+                println!("📊 Cache Stats");
+                println!("   Directory: {}", cache_dir.display());
+                println!("   Backend: {}", cli.backend);
+                println!("   Cached paths: {count}");
+                println!("   Narinfo size: {:.1} KB", narinfo_size as f64 / 1024.0);
+                if let Some(stats) = dedup {
+                    if stats.nar_count > 0 {
+                        println!("   NAR objects: {}", stats.nar_count);
+                        println!(
+                            "   Total NAR bytes: {:.1} KB",
+                            stats.total_nar_bytes as f64 / 1024.0
+                        );
+                        println!(
+                            "   Unique chunk bytes: {:.1} KB",
+                            stats.unique_chunk_bytes as f64 / 1024.0
+                        );
+                        println!("   Unique chunks: {}", stats.unique_chunks);
+                        println!("   Dedup ratio: {:.2}x", stats.dedup_ratio());
+                    }
+                }
+            }
         }
     }
 
