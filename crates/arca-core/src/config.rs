@@ -30,7 +30,9 @@ impl std::str::FromStr for SegmentFilter {
             "nixpkgs" => Ok(SegmentFilter::Nixpkgs),
             "custom" => Ok(SegmentFilter::Custom),
             "all" => Ok(SegmentFilter::All),
-            other => Err(format!("unknown filter: {other} (expected nixpkgs, custom, or all)")),
+            other => Err(format!(
+                "unknown filter: {other} (expected nixpkgs, custom, or all)"
+            )),
         }
     }
 }
@@ -449,8 +451,14 @@ mod tests {
     #[test]
     fn test_segment_filter_from_str() {
         use std::str::FromStr;
-        assert_eq!(SegmentFilter::from_str("nixpkgs").unwrap(), SegmentFilter::Nixpkgs);
-        assert_eq!(SegmentFilter::from_str("CUSTOM").unwrap(), SegmentFilter::Custom);
+        assert_eq!(
+            SegmentFilter::from_str("nixpkgs").unwrap(),
+            SegmentFilter::Nixpkgs
+        );
+        assert_eq!(
+            SegmentFilter::from_str("CUSTOM").unwrap(),
+            SegmentFilter::Custom
+        );
         assert_eq!(SegmentFilter::from_str("all").unwrap(), SegmentFilter::All);
         assert!(SegmentFilter::from_str("bogus").is_err());
     }

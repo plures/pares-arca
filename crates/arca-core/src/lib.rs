@@ -38,7 +38,7 @@ pub use audit::{AuditEntry, AuditEventType, AuditLog};
 pub use backend::CacheBackend;
 pub use config::{CacheConfig, CacheSegment, Compression, ConfigError, SegmentFilter};
 pub use error::ArcaError;
-pub use narinfo::{NarInfo, parse_narinfo};
+pub use narinfo::{parse_narinfo, NarInfo};
 pub use object_store::{DedupStats, NarObjectError, NarObjectStore};
 pub use signing::{generate_keypair_files, verify_narinfo_sig, CacheSigningKey};
 pub use sled_store::SledStore;

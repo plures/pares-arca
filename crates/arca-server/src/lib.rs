@@ -7,8 +7,8 @@
 //! - `GET /api/status` — JSON status for CLI
 
 use std::path::PathBuf;
-use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::Arc;
 
 use axum::{
     body::Body,
@@ -19,7 +19,7 @@ use axum::{
     Router,
 };
 use tokio::net::TcpListener;
-use tracing::{info, debug};
+use tracing::{debug, info};
 
 use arca_core::backend::CacheBackend;
 use arca_core::NarObjectStore;
@@ -91,7 +91,10 @@ pub async fn serve(
                     "hourly stats"
                 );
             } else {
-                info!(cached_paths = stats_state.backend.count(), "heartbeat: idle, no requests in last hour");
+                info!(
+                    cached_paths = stats_state.backend.count(),
+                    "heartbeat: idle, no requests in last hour"
+                );
             }
         }
     });
@@ -163,7 +166,9 @@ async fn nar_file(
     // Try plures-object store first
     if let Ok(data) = state.nar_store.get_nar(&file).await {
         state.nar_served.fetch_add(1, Ordering::Relaxed);
-        state.nar_bytes_served.fetch_add(data.len() as u64, Ordering::Relaxed);
+        state
+            .nar_bytes_served
+            .fetch_add(data.len() as u64, Ordering::Relaxed);
         info!(file = %file, bytes = data.len(), "nar: served from object store");
         return (
             StatusCode::OK,

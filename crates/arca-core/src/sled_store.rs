@@ -23,11 +23,14 @@ pub struct SledStore {
 impl SledStore {
     /// Open or create a PluresDB-backed narinfo store at the given path.
     pub fn new(db_path: impl AsRef<std::path::Path>) -> Result<Self, sled::Error> {
-        let storage = SledStorage::open(db_path)
-            .map_err(|e| sled::Error::Io(std::io::Error::other(format!("PluresDB storage open: {e}"))))?;
-        let store = CrdtStore::default()
-            .with_persistence(Arc::new(storage) as Arc<dyn StorageEngine>);
-        Ok(Self { store: Arc::new(store) })
+        let storage = SledStorage::open(db_path).map_err(|e| {
+            sled::Error::Io(std::io::Error::other(format!("PluresDB storage open: {e}")))
+        })?;
+        let store =
+            CrdtStore::default().with_persistence(Arc::new(storage) as Arc<dyn StorageEngine>);
+        Ok(Self {
+            store: Arc::new(store),
+        })
     }
 
     /// Get a reference to the underlying CrdtStore for sync setup.
@@ -98,9 +101,7 @@ impl CacheBackend for SledStore {
             .list()
             .iter()
             .filter(|r| r.id.starts_with(NARINFO_PREFIX))
-            .map(|r| {
-                r.data.as_str().map(|s| s.len() as u64).unwrap_or(0)
-            })
+            .map(|r| r.data.as_str().map(|s| s.len() as u64).unwrap_or(0))
             .sum()
     }
 }

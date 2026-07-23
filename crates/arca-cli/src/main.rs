@@ -264,9 +264,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 println!("   • {} ({:?})", seg.name, seg.filter);
             }
             let server_backend: Box<dyn CacheBackend> = match cli.backend.as_str() {
-                "sled" => {
-                    Box::new(ArcBackendWrapper(Arc::clone(&backend)))
-                }
+                "sled" => Box::new(ArcBackendWrapper(Arc::clone(&backend))),
                 _ => Box::new(arca_core::FsNarinfoStore::new(&cache_dir)),
             };
 
@@ -506,7 +504,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 let path = entry.path();
                 let content = match std::fs::read_to_string(&path) {
                     Ok(c) => c,
-                    Err(_) => { errors += 1; continue; }
+                    Err(_) => {
+                        errors += 1;
+                        continue;
+                    }
                 };
 
                 if !force && content.lines().any(|l| l.starts_with("Sig:")) {
@@ -516,7 +517,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
                 let info = match arca_core::parse_narinfo(&content) {
                     Ok(info) => info,
-                    Err(_) => { errors += 1; continue; }
+                    Err(_) => {
+                        errors += 1;
+                        continue;
+                    }
                 };
 
                 let sig = sk.sign_narinfo(
@@ -528,7 +532,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
                 // When force-resigning, strip existing Sig lines
                 let base_content: String = if force {
-                    content.lines()
+                    content
+                        .lines()
                         .filter(|l| !l.starts_with("Sig:"))
                         .collect::<Vec<_>>()
                         .join("\n")

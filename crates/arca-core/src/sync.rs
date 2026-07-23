@@ -20,10 +20,7 @@ const SYNC_ACTOR: &str = "pares-arca-sync";
 /// replicate CrdtStore contents automatically.
 ///
 /// Returns a JoinHandle for the background sync task.
-pub fn start_sync(
-    store: Arc<CrdtStore>,
-    topic: &str,
-) -> Result<JoinHandle<()>, String> {
+pub fn start_sync(store: Arc<CrdtStore>, topic: &str) -> Result<JoinHandle<()>, String> {
     let topic_key = derive_topic_key(topic);
     let runtime = tokio::runtime::Handle::try_current()
         .map_err(|e| format!("start_sync requires an active Tokio runtime: {e}"))?;
@@ -82,25 +79,22 @@ async fn handle_sync_connection(
 
     // Receive records from the peer
     loop {
-        let maybe_payload = match tokio::time::timeout(
-            std::time::Duration::from_secs(5),
-            connection.receive(),
-        )
-        .await
-        {
-            Ok(result) => result.map_err(|e| format!("receive failed: {e}"))?,
-            Err(_) => {
-                debug!("sync receive timeout reached; ending peer sync loop");
-                break;
-            }
-        };
+        let maybe_payload =
+            match tokio::time::timeout(std::time::Duration::from_secs(5), connection.receive())
+                .await
+            {
+                Ok(result) => result.map_err(|e| format!("receive failed: {e}"))?,
+                Err(_) => {
+                    debug!("sync receive timeout reached; ending peer sync loop");
+                    break;
+                }
+            };
 
         let Some(payload) = maybe_payload else {
             break;
         };
 
-        let message =
-            GunMessage::decode(&payload).map_err(|e| format!("decode failed: {e}"))?;
+        let message = GunMessage::decode(&payload).map_err(|e| format!("decode failed: {e}"))?;
 
         if let GunMessage::Put(put) = message {
             for (id, node) in put.put {

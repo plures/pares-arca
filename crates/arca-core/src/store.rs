@@ -464,7 +464,9 @@ pub struct FsNarinfoStore {
 
 impl FsNarinfoStore {
     pub fn new(cache_dir: impl Into<PathBuf>) -> Self {
-        Self { cache_dir: cache_dir.into() }
+        Self {
+            cache_dir: cache_dir.into(),
+        }
     }
 }
 
