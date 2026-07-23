@@ -263,7 +263,7 @@ mod tests {
         assert!(!verify_narinfo_sig(
             &key.public_key_nix_format(),
             &sig,
-            &tampered_fp
+            tampered_fp
         ));
     }
 
