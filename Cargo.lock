@@ -136,7 +136,7 @@ checksum = "7f202df86484c868dbad7eaa557ef785d5c66295e41b460ef922eca0723b842c"
 
 [[package]]
 name = "arca-core"
-version = "0.3.1"
+version = "1.2.0"
 dependencies = [
  "anyhow",
  "base64",
@@ -165,7 +165,7 @@ dependencies = [
 
 [[package]]
 name = "arca-server"
-version = "0.3.1"
+version = "1.2.0"
 dependencies = [
  "arca-core",
  "axum",
@@ -1358,7 +1358,7 @@ checksum = "c08d65885ee38876c4f86fa503fb49d7b507c2b62552df7c70b2fce627e06381"
 
 [[package]]
 name = "pares-arca"
-version = "0.3.1"
+version = "1.2.0"
 dependencies = [
  "arca-core",
  "arca-server",
