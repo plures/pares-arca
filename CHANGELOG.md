@@ -1,3 +1,7 @@
+## [1.2.1] — 2026-07-23
+
+- fix(nix): preserve upstream substituters when enabling Arca (#18) (1d8bf2b)
+
 ## [1.2.0] — 2026-07-23
 
 - ci(release): trigger release pipeline on merge to main (#16) (1428aa9)
