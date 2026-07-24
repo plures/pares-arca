@@ -43,7 +43,10 @@ impl NarObjectStore {
         // Ensure directories exist
         for dir in [&objects_dir, &blobs_dir, &index_dir] {
             if let Err(e) = std::fs::create_dir_all(dir) {
-                tracing::warn!("failed to create {}: {e}, attempting cleanup", dir.display());
+                tracing::warn!(
+                    "failed to create {}: {e}, attempting cleanup",
+                    dir.display()
+                );
                 if objects_dir.is_dir() {
                     let _ = std::fs::remove_dir_all(&objects_dir);
                 } else if objects_dir.exists() {
@@ -69,7 +72,9 @@ impl NarObjectStore {
                 match FileBlobStore::open(&blobs_dir) {
                     Ok(bs) => bs,
                     Err(e2) => {
-                        tracing::error!("FileBlobStore still failing ({e2}), falling back to tempdir");
+                        tracing::error!(
+                            "FileBlobStore still failing ({e2}), falling back to tempdir"
+                        );
                         use std::sync::atomic::{AtomicU64, Ordering};
                         static BLOB_COUNTER: AtomicU64 = AtomicU64::new(0);
                         let n = BLOB_COUNTER.fetch_add(1, Ordering::Relaxed);
@@ -117,7 +122,10 @@ impl NarObjectStore {
         }
 
         // Attempt 3: wipe the entire index directory and recreate
-        tracing::warn!("wiping PluresDB index at {} and recreating", index_dir.display());
+        tracing::warn!(
+            "wiping PluresDB index at {} and recreating",
+            index_dir.display()
+        );
         if let Err(e) = std::fs::remove_dir_all(index_dir) {
             tracing::error!("failed to remove PluresDB index dir: {e}");
         }
@@ -131,14 +139,17 @@ impl NarObjectStore {
                     .with_persistence(Arc::new(storage) as Arc<dyn StorageEngine>);
                 return Arc::new(store);
             }
-            Err(e3) => tracing::error!("PluresDB index recreation failed ({e3}), falling back to tempdir"),
+            Err(e3) => {
+                tracing::error!("PluresDB index recreation failed ({e3}), falling back to tempdir")
+            }
         }
 
         // Attempt 4: last resort — use a temporary directory
         use std::sync::atomic::{AtomicU64, Ordering};
         static COUNTER: AtomicU64 = AtomicU64::new(0);
         let n = COUNTER.fetch_add(1, Ordering::Relaxed);
-        let tmp = std::env::temp_dir().join(format!("pares-arca-pluresdb-{}-{n}", std::process::id()));
+        let tmp =
+            std::env::temp_dir().join(format!("pares-arca-pluresdb-{}-{n}", std::process::id()));
         let _ = std::fs::create_dir_all(&tmp);
         match SledStorage::open(&tmp) {
             Ok(storage) => {
@@ -149,7 +160,10 @@ impl NarObjectStore {
             }
             Err(e4) => {
                 // Use in-memory fallback — truly last resort
-                tracing::error!("PluresDB cannot open even in tempdir {}: {e4} — using in-memory store", tmp.display());
+                tracing::error!(
+                    "PluresDB cannot open even in tempdir {}: {e4} — using in-memory store",
+                    tmp.display()
+                );
                 Arc::new(CrdtStore::default())
             }
         }
@@ -390,7 +404,10 @@ mod tests {
         let store = NarObjectStore::new(tmp.path());
 
         // Should be functional after recovery
-        store.put_nar("recovered.nar.xz", vec![1u8; 100]).await.unwrap();
+        store
+            .put_nar("recovered.nar.xz", vec![1u8; 100])
+            .await
+            .unwrap();
         assert!(store.has_nar("recovered.nar.xz").await);
     }
 

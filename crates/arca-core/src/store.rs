@@ -436,26 +436,6 @@ impl CacheBackend for CacheStore {
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_new_creates_dirs() {
-        let tmp = tempfile::tempdir().unwrap();
-        let store = CacheStore::new(tmp.path().join("cache")).unwrap();
-        assert!(store.path().join("nar").exists());
-        assert!(store.path().join("nix-cache-info").exists());
-    }
-
-    #[test]
-    fn test_has_returns_false_for_missing() {
-        let tmp = tempfile::tempdir().unwrap();
-        let store = CacheStore::new(tmp.path().join("cache")).unwrap();
-        assert!(!store.has("nonexistent"));
-    }
-}
-
 /// Lightweight narinfo-only filesystem backend.
 /// Use when the NarObjectStore is managed separately (e.g., by `serve()`).
 pub struct FsNarinfoStore {
@@ -464,7 +444,9 @@ pub struct FsNarinfoStore {
 
 impl FsNarinfoStore {
     pub fn new(cache_dir: impl Into<PathBuf>) -> Self {
-        Self { cache_dir: cache_dir.into() }
+        Self {
+            cache_dir: cache_dir.into(),
+        }
     }
 }
 
@@ -506,5 +488,25 @@ impl CacheBackend for FsNarinfoStore {
             .filter_map(|e| e.metadata().ok())
             .map(|m| m.len())
             .sum()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_new_creates_dirs() {
+        let tmp = tempfile::tempdir().unwrap();
+        let store = CacheStore::new(tmp.path().join("cache")).unwrap();
+        assert!(store.path().join("nar").exists());
+        assert!(store.path().join("nix-cache-info").exists());
+    }
+
+    #[test]
+    fn test_has_returns_false_for_missing() {
+        let tmp = tempfile::tempdir().unwrap();
+        let store = CacheStore::new(tmp.path().join("cache")).unwrap();
+        assert!(!store.has("nonexistent"));
     }
 }

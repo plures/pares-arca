@@ -116,9 +116,14 @@ mod tests {
         // Expected nix-base32: 1z5ly7pdxg4i0p8v6sd3v4ipvjrc1p2i4qxv6q4rqyckcyqh6igh
         use base64::engine::general_purpose::STANDARD as B64;
         use base64::Engine as _;
-        let bytes = B64.decode("8EUDsWeTeZwJNrtjEsUNLMt9I9mjabPRBZG83u7xtPw=").unwrap();
+        let bytes = B64
+            .decode("8EUDsWeTeZwJNrtjEsUNLMt9I9mjabPRBZG83u7xtPw=")
+            .unwrap();
         assert_eq!(bytes.len(), 32);
         let encoded = encode(&bytes);
-        assert_eq!(encoded, "1z5ly7pdxg4i0p8v6sd3v4ipvjrc1p2i4qxv6q4rqyckcyqh6igh");
+        assert_eq!(
+            encoded,
+            "1z5ly7pdxg4i0p8v6sd3v4ipvjrc1p2i4qxv6q4rqyckcyqh6igh"
+        );
     }
 }
