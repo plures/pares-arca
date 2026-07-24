@@ -638,12 +638,18 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             let nar_store = arca_core::NarObjectStore::new(&cache_dir);
             let dedup = nar_store.dedup_stats().await.ok();
 
+            let backend_label = if cli.backend == "sled" {
+                "sled"
+            } else {
+                "filesystem"
+            };
+
             if json {
                 let mut body = serde_json::json!({
                     "cached_paths": count,
                     "total_narinfo_size_bytes": narinfo_size,
                     "cache_dir": cache_dir.display().to_string(),
-                    "backend": cli.backend,
+                    "backend": backend_label,
                 });
                 if let Some(stats) = &dedup {
                     body["object_store"] = serde_json::json!({
