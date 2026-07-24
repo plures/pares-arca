@@ -569,7 +569,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                             if !seg.description.is_empty() {
                                 println!("     {}", seg.description);
                             }
-                            println!("     topic_key: {}", seg.topic_key);
+                            let displayed_key = if seg.name == "universal" {
+                                seg.topic_key.as_str()
+                            } else {
+                                "<redacted>"
+                            };
+                            println!("     topic_key: {displayed_key}");
                         }
                     }
                 }
