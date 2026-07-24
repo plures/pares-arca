@@ -210,23 +210,31 @@ impl CacheConfig {
 
     /// Add a new segment. Returns an error if a segment with the same name
     /// already exists, or if the segment fails validation.
-    pub fn add_segment(&mut self, segment: CacheSegment) -> Result<(), ConfigError> {
-        if self.segments.iter().any(|s| s.name == segment.name) {
-            return Err(ConfigError::DuplicateSegment {
-                name: segment.name.clone(),
-            });
-        }
-        if segment.topic_key.len() != 64
-            || !segment.topic_key.chars().all(|c| c.is_ascii_hexdigit())
-        {
-            return Err(ConfigError::InvalidTopicKey {
-                name: segment.name.clone(),
-                len: segment.topic_key.len(),
-            });
-        }
-        self.segments.push(segment);
-        Ok(())
+pub fn add_segment(&mut self, segment: CacheSegment) -> Result<(), ConfigError> {
+    if segment.name.is_empty() {
+        return Err(ConfigError::MissingName {
+            name: "(empty)".to_string(),
+        });
     }
+    if segment.topic_key.is_empty() {
+        return Err(ConfigError::MissingTopicKey {
+            name: segment.name.clone(),
+        });
+    }
+    if self.segments.iter().any(|s| s.name == segment.name) {
+        return Err(ConfigError::DuplicateSegment {
+            name: segment.name.clone(),
+        });
+    }
+    if segment.topic_key.len() != 64 || !segment.topic_key.chars().all(|c| c.is_ascii_hexdigit()) {
+        return Err(ConfigError::InvalidTopicKey {
+            name: segment.name.clone(),
+            len: segment.topic_key.len(),
+        });
+    }
+    self.segments.push(segment);
+    Ok(())
+}
 
     /// Remove a segment by name. Returns true if a segment was removed.
     pub fn remove_segment(&mut self, name: &str) -> bool {
