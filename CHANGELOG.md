@@ -1,3 +1,7 @@
+## [1.3.0] — 2026-07-24
+
+- feat(cli): topics + cache-stats commands (#17) (1d615b0)
+
 ## [1.2.1] — 2026-07-23
 
 - fix(nix): preserve upstream substituters when enabling Arca (#18) (1d8bf2b)
