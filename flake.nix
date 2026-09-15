@@ -134,6 +134,12 @@
               description = "Automatically generate a signing key pair on first start if none exists.";
             };
 
+            publicKeyFile = lib.mkOption {
+              type = lib.types.nullOr lib.types.path;
+              default = null;
+              description = "Path to the public key corresponding to secretKeyFile; auto-derived for generated keys.";
+            };
+
             logLevel = lib.mkOption {
               type = lib.types.enum [ "error" "warn" "info" "debug" "trace" ];
               default = "info";
@@ -178,9 +184,10 @@
             hostname = config.networking.hostName or "pares-arca";
           in {
             # ── Key Generation ────────────────────────────────────────────
-            # Generate signing key on first activation. Runs before nix-daemon
-            # restarts during nixos-rebuild switch, so the key exists by the
-            # time the daemon reads secret-key-files.
+            # Generate signing key on first activation and publish its public
+            # half through a Nix config fragment. The include-if-exists keeps
+            # the first build bootstrappable; subsequent builds trust Arca's
+            # local substitutes automatically.
             system.activationScripts.pares-arca-signing-key = lib.mkIf cfg.autoSigningKey ''
               KEY_DIR="${cfg.signingKeyDir}"
               SECRET="$KEY_DIR/secret-key.pem"
@@ -196,17 +203,20 @@
                 echo "[pares-arca] Signing key generated. Public key:"
                 cat "$PUBLIC"
               fi
+              if [ -f "$PUBLIC" ]; then
+                printf 'extra-trusted-public-keys = %s\\n' "$(cat \"$PUBLIC\")" > "$KEY_DIR/nix-trusted-key.conf"
+                chmod 644 "$KEY_DIR/nix-trusted-key.conf"
+              fi
+            '';
+
+            system.activationScripts.pares-arca-trust-key = lib.mkIf (!cfg.autoSigningKey && cfg.publicKeyFile != null) ''
+              KEY_DIR="${cfg.signingKeyDir}"
+              mkdir -p "$KEY_DIR"
+              printf 'extra-trusted-public-keys = %s\\n' "$(cat \"${cfg.publicKeyFile}\")" > "$KEY_DIR/nix-trusted-key.conf"
+              chmod 644 "$KEY_DIR/nix-trusted-key.conf"
             '';
 
             # ── Nix Daemon Configuration ──────────────────────────────────
-            # secret-key-files tells the nix daemon: "I own these keys, trust
-            # paths signed by their public counterparts." This is the mechanism
-            # designed for local binary caches — no !include, no manual
-            # trusted-public-keys, no timing issues.
-            #
-            # From the Nix manual: "A trusted key is one listed in
-            # trusted-public-keys, or a public key counterpart to a private
-            # key stored in a file listed in secret-key-files."
             # Add Arca alongside (rather than instead of) Nix's configured
             # upstream substituters, preserving cache.nixos.org and any
             # organization cache supplied by the host configuration.
@@ -219,6 +229,7 @@
             # post-build-hook imports every build into the local cache
             nix.extraOptions = lib.mkIf cfg.postBuildHook ''
               post-build-hook = ${postBuildHookScript}
+              !include-if-exists ${cfg.signingKeyDir}/nix-trusted-key.conf
             '';
 
             # ── Service ───────────────────────────────────────────────────
